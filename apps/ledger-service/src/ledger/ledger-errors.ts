@@ -31,16 +31,21 @@ export function idempotencyKeyReused() {
   });
 }
 
-// Два паралельні запити з тим самим ключем, але на різні гаманці, не
-// серіалізуються блокуванням гаманця: другий впирається в PK operations.
-// Це завжди різні параметри (гаманець входить у хеш запиту).
+// Паралельні запити на різні гаманці не серіалізуються блокуванням гаманця:
+// другий впирається в PK. Той самий ключ — це завжди різні параметри
+// (гаманець входить у хеш запиту); той самий holdId — холд уже існує.
 export function rethrowOperationConflict(error: unknown): never {
   if (
     error instanceof QueryFailedError &&
-    (error.driverError as { code?: string; table?: string }).code === '23505' &&
-    (error.driverError as { table?: string }).table === 'operations'
+    (error.driverError as { code?: string }).code === '23505'
   ) {
-    throw idempotencyKeyReused();
+    const { table } = error.driverError as { table?: string };
+    if (table === 'operations') {
+      throw idempotencyKeyReused();
+    }
+    if (table === 'holds') {
+      throw ledgerConflict('HOLD_NOT_ACTIVE', 'Холд уже існує');
+    }
   }
   throw error;
 }
