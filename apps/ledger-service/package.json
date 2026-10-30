@@ -20,6 +20,7 @@
     "@nestjs/jwt": "^10.2.0",
     "@nestjs/passport": "^10.0.3",
     "@nestjs/typeorm": "^10.0.2",
+    "@nestjs/terminus": "^10.3.0",
     "typeorm": "^0.3.20",
     "pg": "^8.11.3",
     "passport": "^0.7.0",
