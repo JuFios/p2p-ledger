@@ -1,4 +1,5 @@
 import { INestApplication } from '@nestjs/common';
+import request from 'supertest';
 import {
   createApp,
   createWallet,
@@ -46,5 +47,19 @@ describe('Wallets concurrency (e2e)', () => {
     expect(results.every((r) => r.status === 201)).toBe(true);
     const final = await getWallet(app, token, wallet.id);
     expect(final.body.balance).toBe('200.00');
+  });
+
+  it('паралельні POST /wallets не створюють дублікатів гаманця', async () => {
+    const { token } = await registerUser(app);
+
+    const wallets = await Promise.all(
+      Array.from({ length: 10 }, () => createWallet(app, token, 'UAH')),
+    );
+
+    expect(new Set(wallets.map((w) => w.id)).size).toBe(1);
+    const list = await request(app.getHttpServer())
+      .get('/wallets')
+      .set('Authorization', `Bearer ${token}`);
+    expect(list.body).toHaveLength(1);
   });
 });
