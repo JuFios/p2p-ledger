@@ -15,6 +15,9 @@ export const LEDGER_EVENTS_STREAM = 'stream:ledger-events';
 
 const BATCH = 100;
 
+// Ключ advisory lock relay: публікує лише один інстанс одночасно.
+const RELAY_LOCK = 0x6c656467; // 'ledg'
+
 interface OutboxRow {
   id: string;
   event_id: string;
@@ -29,7 +32,9 @@ interface OutboxRow {
 // Outbox relay: неопубліковані рядки outbox → XADD у Redis Stream → published_at.
 // XADD виконується до коміту, тож падіння між ними дає повторну публікацію
 // (at-least-once) — її поглинає дедуплікація консюмера за eventId.
-// SKIP LOCKED дозволяє кільком інстансам не блокувати одне одного.
+// Кілька інстансів не публікують паралельно (advisory lock): інакше сусідні
+// батчі потрапили б у стрім упереміш. Записи одного гаманця серіалізовані
+// його блокуванням, тож у порядку id вони йдуть і в стрім.
 @Injectable()
 export class OutboxRelay implements OnModuleInit, BeforeApplicationShutdown {
   private readonly logger = new Logger(OutboxRelay.name);
@@ -68,9 +73,17 @@ export class OutboxRelay implements OnModuleInit, BeforeApplicationShutdown {
     while ((await this.publishBatch()) === BATCH);
   }
 
-  private publishBatch(): Promise<number> {
+  private async publishBatch(): Promise<number> {
+    // Поки Redis недоступний, не тримаємо транзакцію й блокування outbox
+    // в очікуванні таймауту XADD.
+    if (this.redis.status !== 'ready') return 0;
     const maxLen = Number(this.config.get('STREAM_MAXLEN', 100000));
     return this.dataSource.transaction(async (manager) => {
+      const [{ locked }]: { locked: boolean }[] = await manager.query(
+        'SELECT pg_try_advisory_xact_lock($1) AS locked',
+        [RELAY_LOCK],
+      );
+      if (!locked) return 0;
       const rows: OutboxRow[] = await manager.query(
         `SELECT id, event_id, type, version, payload, user_ids, traceparent, created_at
          FROM outbox WHERE published_at IS NULL

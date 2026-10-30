@@ -1,12 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
-import {
-  HealthCheckError,
-  HealthIndicator,
-  HealthIndicatorResult,
-} from '@nestjs/terminus';
+import { HealthIndicator, HealthIndicatorResult } from '@nestjs/terminus';
 import Redis from 'ioredis';
 import { REDIS } from '../redis/redis.module';
 
+// Недоступний Redis — деградація, а не відмова: запис у ledger від нього не
+// залежить (інтеграційні події чекають в outbox), тож статус показуємо,
+// але health загалом не валимо.
 @Injectable()
 export class RedisHealthIndicator extends HealthIndicator {
   constructor(@Inject(REDIS) private readonly redis: Redis) {
@@ -18,7 +17,9 @@ export class RedisHealthIndicator extends HealthIndicator {
       await this.redis.ping();
       return this.getStatus(key, true);
     } catch {
-      throw new HealthCheckError('Redis ping failed', this.getStatus(key, false));
+      return this.getStatus(key, false, {
+        message: 'Redis недоступний: події чекають в outbox',
+      });
     }
   }
 }
