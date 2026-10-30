@@ -1,4 +1,4 @@
-import { Test } from '@nestjs/testing';
+import { validate } from '../src/config/env.validation';
 
 const REQUIRED = [
   'DATABASE_HOST',
@@ -11,29 +11,29 @@ const REQUIRED = [
 
 // F4: без обов'язкових змінних сервіс не повинен стартувати
 // (раніше JWT мовчки підписувався відомим секретом 'change-me-access').
+// Тестуємо validate() напряму: бут модуля залежить від локального .env.
 describe('Environment validation', () => {
-  const saved = { ...process.env };
+  const complete = () =>
+    Object.fromEntries(REQUIRED.map((key) => [key, 'value']));
 
-  beforeEach(() => {
-    for (const key of REQUIRED) {
-      process.env[key] = 'value';
-    }
-    jest.resetModules();
+  it('accepts a complete environment and keeps unrelated variables', () => {
+    const config = { ...complete(), PORT: '3001' };
+    expect(validate(config)).toEqual(config);
   });
 
-  afterAll(() => {
-    process.env = saved;
+  it.each(REQUIRED)('rejects a missing %s', (name) => {
+    const config = complete();
+    delete config[name];
+    expect(() => validate(config)).toThrow(name);
   });
 
-  // ConfigModule.forRoot асинхронний: помилка валідації з'являється
-  // під час збирання модуля, до будь-якого підключення до БД.
-  async function boot() {
-    const { AppModule } = await import('../src/app.module');
-    await Test.createTestingModule({ imports: [AppModule] }).compile();
-  }
+  it.each(REQUIRED)('rejects an empty %s', (name) => {
+    expect(() => validate({ ...complete(), [name]: '' })).toThrow(name);
+  });
 
-  it.each(REQUIRED)('refuses to start without %s', async (name) => {
-    delete process.env[name];
-    await expect(boot()).rejects.toThrow(name);
+  it('rejects a non-numeric DATABASE_PORT', () => {
+    expect(() => validate({ ...complete(), DATABASE_PORT: 'abc' })).toThrow(
+      'DATABASE_PORT',
+    );
   });
 });
