@@ -37,7 +37,13 @@ docker-compose up --build
 
 Swagger ledger-service — http://localhost:3001/docs. Адмін створюється на
 старті з `ADMIN_EMAIL` / `ADMIN_PASSWORD` (`apps/ledger-service/.env.example`);
-адмін-ендпоінти — `/admin/*` (event-лог гаманця, reconciliation, freeze).
+роль admin має лише цей акаунт — після зміни `ADMIN_EMAIL` попередній адмін
+стає звичайним користувачем. Адмін-ендпоінти — `/admin/*` (event-лог гаманця,
+reconciliation, freeze). Заморожений гаманець не приймає й не віддає гроші
+(deposit, withdraw, новий холд, зарахування переказу й списання холду на
+користь отримувача → 409); холд на ньому можна лише зняти (компенсація саги).
+Міжвалютне зарахування (`POST /internal/holds/:id/capture`) приймається, лише
+якщо сума = сума холду × `fxRate` з точністю до однієї мінорної одиниці.
 Звірку можна запустити й скриптом: `docker compose exec ledger-service npm run reconcile`
 (код виходу 1 — є розбіжності).
 
@@ -88,14 +94,21 @@ cd apps/ledger-service && npm test
 
 `apps/ledger-service/test/wallets.service.spec.ts`:
 - Тест овердрафту переписано (див. вище).
-- Баланс більше не поле гаманця, а проєкція подій: сервіс пише подію в event store і оновлює проєкцію в одній транзакції. Тому моки репозиторію замінено на мок `EntityManager` (транзакція) і `EventStore`. Збережено ті самі перевірки поведінки, що й у стартовому тесті: депозит збільшує баланс (і пише подію `MoneyDeposited` зі збалансованими проводками, оновлює проєкцію під блокуванням рядка); зняття понад баланс → `BadRequestException`, і нічого не записано (ні події, ні проєкції, ні outbox); чужий гаманець шукається за парою `{ id, ownerId }` і дає `NotFoundException`. Наскрізну арифметику балансу проти реального Postgres перевіряють e2e (`wallets.e2e-spec.ts`), які під час переходу на event sourcing не змінювались.
+- Баланс більше не поле гаманця, а проєкція подій: сервіс пише подію в event store і оновлює проєкцію в одній транзакції. Тому моки репозиторію замінено на мок `EntityManager` (транзакція; рядок проєкції блокується спільним для всіх команд ledger `SELECT … FOR UPDATE` через `find`) і `EventStore`. Збережено ті самі перевірки поведінки, що й у стартовому тесті: депозит збільшує баланс (і пише подію `MoneyDeposited` зі збалансованими проводками, оновлює проєкцію під блокуванням рядка); зняття понад баланс → `BadRequestException`, і нічого не записано (ні події, ні проєкції, ні outbox); чужий гаманець шукається за парою `{ id, ownerId }` і дає `NotFoundException`. Наскрізну арифметику балансу проти реального Postgres перевіряють e2e (`wallets.e2e-spec.ts`), які під час переходу на event sourcing не змінювались.
 
-`npm test` у ledger не запускає `test/e2e`; e2e — окремо: `docker compose up -d ledger-db redis && npm run test:e2e`.
-Звірка в e2e перевіряє всю БД, тож запускати їх варто на чистій базі (у CI вона щоразу нова).
+`npm test` у ledger не запускає `test/e2e`; e2e — окремо, на власній БД `ledger_e2e` (не на робочій `ledger`, з якою працює `docker compose up`):
+
+```bash
+docker compose up -d ledger-db redis
+docker compose exec ledger-db createdb -U ledger ledger_e2e
+cd apps/ledger-service && npm run test:e2e
+```
+
+Звірка в e2e перевіряє всю БД, тож запускати їх варто на чистій базі (у CI вона щоразу нова; там БД задається через `DATABASE_NAME`).
 
 ### Змінений стартовий код ledger-service
 
 - `auth.controller.ts` — на `POST /auth/login` додано `LoginThrottlerGuard` (ТЗ: rate limiting на логін). Ліміт рахується за email, а не за IP: усі запити до сервісу приходять через один BFF. Сам `AuthService` не змінювався.
-- `health` — крім БД перевіряє Redis (стрім подій для інших сервісів); `docker-compose.yml`: ledger-service чекає на здоровий `redis`.
+- `health` — крім БД показує стан Redis (стрім подій для інших сервісів). Недоступний Redis — деградація (`redis: down` у відповіді), а не відмова: запис у ledger від нього не залежить, події чекають в outbox, і relay не публікує, доки Redis не повернеться. `docker-compose.yml`: ledger-service на старті чекає на здоровий `redis`.
 - `main.ts` — Swagger на `/docs` і `enableShutdownHooks()` (фоновий outbox relay зупиняється коректно); `nest-cli.json` — плагін `@nestjs/swagger` (опис DTO без ручних декораторів).
-- Публічний контракт гаманців розширено без поломок: `deposit`/`withdraw` приймають опційний заголовок `Idempotency-Key` (повтор → той самий результат, той самий ключ з іншим тілом → 422 `IDEMPOTENCY_KEY_REUSED`); операції із замороженим гаманцем → 409 `WALLET_FROZEN`.
+- Публічний контракт гаманців розширено: відповіді гаманця містять ті самі поля, що й у стартері (`balance` рядком), плюс `available`, `held`, `frozen`. **Зміна семантики:** `balance` = `available` + `held` — утримані під переказ кошти ще належать власнику, але витратити їх не можна, тож `withdraw` понад `available` дає 400, навіть якщо сума не перевищує `balance`. `deposit`/`withdraw` приймають опційний заголовок `Idempotency-Key` (повтор → той самий результат, той самий ключ з іншим тілом → 422 `IDEMPOTENCY_KEY_REUSED`); операції із замороженим гаманцем → 409 `WALLET_FROZEN`.
