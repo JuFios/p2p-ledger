@@ -6,11 +6,10 @@ import { WalletsModule } from './wallets/wallets.module';
 import { HealthModule } from './health/health.module';
 import { User } from './auth/entities/user.entity';
 import { Wallet } from './wallets/entities/wallet.entity';
-import { validate } from './config/env.validation';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, validate }),
+    ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRoot({
       type: 'postgres',
       host: process.env.DATABASE_HOST,

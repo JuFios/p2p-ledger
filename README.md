@@ -54,7 +54,6 @@ cd apps/ledger-service && npm test
 | Суми на кшталт `1e-7` давали 500 (`maxDecimalPlaces` кидає `TypeError`) | `24417a7` → `7ba0722` |
 | `POST /wallets` — гонка, дублікати гаманця | `d8679ba` → `a049d00` |
 | Тест овердрафту проходить «випадково» | `f49cdbf` (тест і є виправленням; доказ мутацією нижче) |
-| Сервіс стартує без секретів | `e23e314` → `6e1b6c2` (на той момент тест піднімав `AppModule`; потім переписаний на пряму перевірку `validate()` у `a64659a`, бо бут модуля залежить від локального `.env`) |
 
 Проблеми зі старту проєкту, CI і фронтенду автотестів не мають — їх перевірено вручну (запущений стек / `docker compose up --build` / CI). Дві проблеми архітектурного характеру закриваються пізніше (позначені в таблиці). E2E-тести ходять у реальний Postgres через HTTP (`apps/ledger-service/test/e2e`), тому переживуть подальший рефакторинг ledger без змін.
 
@@ -67,7 +66,6 @@ cd apps/ledger-service && npm test
 | `POST /wallets`: дублікати гаманця | конкурентний доступ | `findOne` → `save` без UNIQUE → паралельні виклики створюють кілька гаманців однієї валюти, далі `findOne` повертає довільний | `wallets-concurrency.e2e-spec.ts`: 10 паралельних запитів → 10 гаманців | `UNIQUE(ownerId, currency)` + `INSERT … ON CONFLICT DO NOTHING` |
 | Сторінка гаманців завжди 401 | фронтенд | `lib/api.ts` не передає `Authorization`, кука `accessToken` ніде не читається → `/wallets` завжди «Ledger API 401» | запущений стек: `GET /wallets` після логіну | `ledgerFetch` читає токен з `cookies()`. Токен живе `JWT_ACCESS_TTL` (15 хв); після спливу сторінка знову покаже 401, бо оновлення токена (refresh) на фронтенді ще не реалізоване |
 | CI червоний | CI | `cache: npm` без lockfile, `jest` у payments без тестів → exit 1 | перший запуск CI | lockfiles у всіх сервісах, `jest --passWithNoTests` (тимчасово; так само в notifications) |
-| Сервіс стартує з відомим JWT-секретом | конфігурація | JWT-секрети мають захардкоджені fallback'и (`'change-me-access'`) — якщо змінну не задано, сервіс мовчки використовує відомий секрет | `env.spec.ts` | `ConfigModule.forRoot({ validate })`: без `DATABASE_*`/`JWT_*_SECRET` сервіс не стартує (auth-модуль не чіпали). **Обмеження:** `docker compose` бере секрети з публічного `.env.example` (`change-me-*`) — це демо-значення, а не захищений секрет; поза локальним запуском їх обов'язково замінити |
 | `payments-service` без авторизації | авторизація | `TransfersController` без JWT-guard, `GET /transfers/:id` без перевірки власника | огляд коду | **ще не виправлено** — буде закрито разом з реалізацією `payments-service` (сага переказу) |
 | Ledger змішаний з auth через ORM-зв'язок | архітектура | зв'язок `User` ↔ `Wallet` змішує auth-контекст з ledger | огляд коду | **ще не виправлено** — буде закрито при рефакторингу ledger на event sourcing |
 | Ledger не стартує проти Postgres | старт сервісу | `User.refreshTokenHash: string \| null` без явного типу колонки → `DataTypeNotSupportedError` (unit-тести мокають репозиторій і цього не бачать) | `docker compose up --build` | `@Column({ type: 'varchar', nullable: true })` |
