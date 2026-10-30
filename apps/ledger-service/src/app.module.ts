@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
 import { WalletsModule } from './wallets/wallets.module';
 import { HealthModule } from './health/health.module';
@@ -27,6 +28,16 @@ import { entities, migrations } from './data-source';
       migrationsRun: true,
     }),
     ScheduleModule.forRoot(),
+    // Застосовується лише там, де стоїть LoginThrottlerGuard (POST /auth/login).
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => [
+        {
+          limit: Number(config.get('LOGIN_RATE_LIMIT', 5)),
+          ttl: Number(config.get('LOGIN_RATE_TTL_MS', 60000)),
+        },
+      ],
+    }),
     AuthModule,
     WalletsModule,
     HealthModule,
