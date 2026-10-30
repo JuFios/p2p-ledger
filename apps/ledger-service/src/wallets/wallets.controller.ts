@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  ParseUUIDPipe,
   Post,
   Request,
   UseGuards,
@@ -34,17 +35,28 @@ export class WalletsController {
   }
 
   @Get(':id')
-  getOne(@Param('id') id: string) {
-    return this.wallets.getById(id);
+  getOne(
+    @Request() req: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.wallets.getById(req.user.userId, id);
   }
 
   @Post(':id/deposit')
-  deposit(@Param('id') id: string, @Body() dto: DepositDto) {
-    return this.wallets.deposit(id, dto.amount);
+  deposit(
+    @Request() req: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: DepositDto,
+  ) {
+    return this.wallets.deposit(req.user.userId, id, dto.amount);
   }
 
   @Post(':id/withdraw')
-  withdraw(@Param('id') id: string, @Body() dto: WithdrawDto) {
-    return this.wallets.withdraw(id, dto.amount);
+  withdraw(
+    @Request() req: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: WithdrawDto,
+  ) {
+    return this.wallets.withdraw(req.user.userId, id, dto.amount);
   }
 }

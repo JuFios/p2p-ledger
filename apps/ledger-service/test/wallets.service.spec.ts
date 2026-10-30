@@ -34,7 +34,7 @@ describe('WalletsService', () => {
       id: 'wallet-1',
       balance: '100.00',
     });
-    const result = await service.deposit('wallet-1', 50);
+    const result = await service.deposit('user-1', 'wallet-1', 50);
     expect(result.balance).toBe('150.00');
   });
 
@@ -44,7 +44,7 @@ describe('WalletsService', () => {
       id: 'wallet-1',
       balance: '100.00',
     });
-    await expect(service.withdraw('wallet-1', 500)).rejects.toBeInstanceOf(
+    await expect(service.withdraw('user-1', 'wallet-1', 500)).rejects.toBeInstanceOf(
       BadRequestException,
     );
     expect(walletsRepo.save).not.toHaveBeenCalled();
