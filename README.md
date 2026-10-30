@@ -29,6 +29,12 @@ docker-compose up --build
 - notifications-service: http://localhost:3003
 - frontend: http://localhost:3000
 
+Схема БД ledger створюється міграціями (`apps/ledger-service/src/migrations`),
+вони застосовуються автоматично на старті сервісу; `synchronize` вимкнено.
+Міграції даних зі стартової схеми (баланс полем у `wallets`) немає — БД
+лише для розробки, тому том зі старою схемою треба перестворити:
+`docker compose down -v`.
+
 Для локальної розробки без Docker: скопіюйте `.env.example` → `.env` у
 кожному сервісі, підніміть Postgres окремо, `npm install && npm run start:dev`
 у потрібному сервісі.
@@ -67,7 +73,7 @@ cd apps/ledger-service && npm test
 | Сторінка гаманців завжди 401 | фронтенд | `lib/api.ts` не передає `Authorization`, кука `accessToken` ніде не читається → `/wallets` завжди «Ledger API 401» | запущений стек: `GET /wallets` після логіну | `ledgerFetch` читає токен з `cookies()`. Токен живе `JWT_ACCESS_TTL` (15 хв); після спливу сторінка знову покаже 401, бо оновлення токена (refresh) на фронтенді ще не реалізоване |
 | CI червоний | CI | `cache: npm` без lockfile, `jest` у payments без тестів → exit 1 | перший запуск CI | lockfiles у всіх сервісах, `jest --passWithNoTests` (тимчасово; так само в notifications) |
 | `payments-service` без авторизації | авторизація | `TransfersController` без JWT-guard, `GET /transfers/:id` без перевірки власника | огляд коду | **ще не виправлено** — буде закрито разом з реалізацією `payments-service` (сага переказу) |
-| Ledger змішаний з auth через ORM-зв'язок | архітектура | зв'язок `User` ↔ `Wallet` змішує auth-контекст з ledger | огляд коду | **ще не виправлено** — буде закрито при рефакторингу ledger на event sourcing |
+| Ledger змішаний з auth через ORM-зв'язок | архітектура | зв'язок `User` ↔ `Wallet` змішує auth-контекст з ledger | огляд коду | зв'язок прибрано: гаманець знає лише `ownerId` (без FK на `users`), баланс — проєкція подій з event store |
 | Ledger не стартує проти Postgres | старт сервісу | `User.refreshTokenHash: string \| null` без явного типу колонки → `DataTypeNotSupportedError` (unit-тести мокають репозиторій і цього не бачать) | `docker compose up --build` | `@Column({ type: 'varchar', nullable: true })` |
 | Образ ledger не запускається | збірка | у `tsconfig.json` немає `include`, а в ledger є `test/` → вихід у `dist/src/main.js`, а образ запускає `node dist/main` | `docker compose up --build` | `tsconfig.build.json` без `test` |
 | Хостові `node_modules` потрапляють в образ | Docker | немає `.dockerignore`: `COPY . .` затирає `node_modules` образу хостовими — натівний `bcrypt` з macOS у Linux-образі дає `Exec format error` | зібрати образ без `.dockerignore` після локального `npm install` | `.dockerignore` (`node_modules`, `dist`, `.env`) у сервісах |
@@ -76,6 +82,6 @@ cd apps/ledger-service && npm test
 
 `apps/ledger-service/test/wallets.service.spec.ts`:
 - Тест овердрафту переписано (див. вище).
-- Сервіс тепер приймає `userId` і працює через транзакцію (`DataSource.transaction`), тому репозиторій у тесті замінено на мок `EntityManager`. Unit-тести перевіряють лише оркестрацію: чужий гаманець шукається за парою `{ id, ownerId }` і дає `NotFoundException` до будь-якого SQL; недостатньо коштів → `BadRequestException` без `UPDATE`; депозит викликає `UPDATE` з потрібними параметрами. **Арифметику балансу мок не перевіряє** — її покривають e2e (`wallets.e2e-spec.ts`: баланс після депозиту/зняття, зняття рівно всього балансу проходить, на копійку більше — ні, депозит не чіпає чужі гаманці). Це перевірено мутаціями (`>=` → `<=`, `WHERE id <> $2`, зняття фільтра власника, зміна ліміту суми) — кожна валить хоча б один тест.
+- Баланс більше не поле гаманця, а проєкція подій: сервіс пише подію в event store і оновлює проєкцію в одній транзакції. Тому моки репозиторію замінено на мок `EntityManager` (транзакція) і `EventStore`. Збережено ті самі перевірки поведінки, що й у стартовому тесті: депозит збільшує баланс (і пише подію `MoneyDeposited` зі збалансованими проводками, оновлює проєкцію під блокуванням рядка); зняття понад баланс → `BadRequestException`, і нічого не записано (ні події, ні проєкції, ні outbox); чужий гаманець шукається за парою `{ id, ownerId }` і дає `NotFoundException`. Наскрізну арифметику балансу проти реального Postgres перевіряють e2e (`wallets.e2e-spec.ts`), які під час переходу на event sourcing не змінювались.
 
 `npm test` у ledger не запускає `test/e2e`; e2e — окремо: `docker compose up -d ledger-db && npm run test:e2e`.
