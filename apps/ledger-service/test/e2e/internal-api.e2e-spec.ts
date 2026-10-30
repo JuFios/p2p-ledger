@@ -24,9 +24,13 @@ describe('Internal API (e2e)', () => {
       () => request(server).post('/internal/holds').send({}),
       () => request(server).get(`/internal/users/by-email/x@example.com`),
     ];
+    // Та сама довжина в символах, але інша в байтах UTF-8.
+    const length = (process.env.INTERNAL_API_TOKEN as string).length;
+    const nonAscii = 'é' + 'x'.repeat(length - 1);
     for (const call of calls) {
       await call().set('Authorization', `Bearer ${a.token}`).expect(401);
       await call().set('x-internal-token', 'wrong-token').expect(401);
+      await call().set('x-internal-token', nonAscii).expect(401);
     }
   });
 

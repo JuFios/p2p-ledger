@@ -17,11 +17,15 @@ export class InternalTokenGuard implements CanActivate {
   canActivate(ctx: ExecutionContext): boolean {
     const expected = this.config.get<string>('INTERNAL_API_TOKEN');
     const actual = ctx.switchToHttp().getRequest().headers['x-internal-token'];
+    // Довжини порівнюємо в байтах: timingSafeEqual падає на буферах різної
+    // довжини (не-ASCII символ займає більше одного байта).
+    const actualBytes = Buffer.from(typeof actual === 'string' ? actual : '');
+    const expectedBytes = Buffer.from(expected ?? '');
     if (
       !expected ||
       typeof actual !== 'string' ||
-      actual.length !== expected.length ||
-      !timingSafeEqual(Buffer.from(actual), Buffer.from(expected))
+      actualBytes.length !== expectedBytes.length ||
+      !timingSafeEqual(actualBytes, expectedBytes)
     ) {
       throw new UnauthorizedException();
     }
