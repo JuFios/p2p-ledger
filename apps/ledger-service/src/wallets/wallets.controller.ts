@@ -11,6 +11,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { WalletsService } from './wallets.service';
 import { DepositDto } from './dto/deposit.dto';
 import { WithdrawDto } from './dto/withdraw.dto';
+import { CreateWalletDto } from './dto/create-wallet.dto';
 
 interface AuthenticatedRequest {
   user: { userId: string; email: string; role: string };
@@ -24,6 +25,12 @@ export class WalletsController {
   @Get()
   list(@Request() req: AuthenticatedRequest) {
     return this.wallets.listForUser(req.user.userId);
+  }
+
+  // Гаманець створюється при першій потребі; повторний виклик повертає наявний.
+  @Post()
+  ensure(@Request() req: AuthenticatedRequest, @Body() dto: CreateWalletDto) {
+    return this.wallets.getOrCreateForUser(req.user.userId, dto.currency);
   }
 
   @Get(':id')
