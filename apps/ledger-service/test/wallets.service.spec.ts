@@ -41,7 +41,7 @@ describe('WalletsService', () => {
     });
     const result = await service.deposit('user-1', 'wallet-1', 50);
     expect(manager.query).toHaveBeenCalledWith(
-      expect.stringContaining('balance + $1::numeric'),
+      expect.stringContaining('balance + $1::numeric WHERE id = $2'),
       ['50.00', 'wallet-1'],
     );
     expect(result.balance).toBe('150.00');
@@ -59,11 +59,16 @@ describe('WalletsService', () => {
   });
 
   it('hides a wallet that belongs to someone else', async () => {
-    expect.assertions(2);
+    expect.assertions(3);
     manager.findOne.mockResolvedValueOnce(null);
     await expect(
       service.withdraw('user-2', 'wallet-1', 10),
     ).rejects.toBeInstanceOf(NotFoundException);
+    // пошук власника саме за парою { id, ownerId }, а не лише за id
+    expect(manager.findOne).toHaveBeenCalledWith(
+      Wallet,
+      expect.objectContaining({ where: { id: 'wallet-1', ownerId: 'user-2' } }),
+    );
     expect(manager.query).not.toHaveBeenCalled();
   });
 });
