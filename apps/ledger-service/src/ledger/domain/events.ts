@@ -6,6 +6,12 @@ export const CURRENT_SCHEMA_VERSION: Record<string, number> = {
   WalletOpened: 1,
   MoneyDeposited: 2,
   MoneyWithdrawn: 1,
+  TransferInitiated: 1,
+  HoldPlaced: 1,
+  HoldReleased: 1,
+  TransferCompleted: 1,
+  TransferFailed: 1,
+  WalletFrozen: 1,
 };
 
 export interface EventMetadata {

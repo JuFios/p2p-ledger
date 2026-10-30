@@ -8,16 +8,20 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiHeader, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { WalletsService } from './wallets.service';
 import { DepositDto } from './dto/deposit.dto';
 import { WithdrawDto } from './dto/withdraw.dto';
 import { CreateWalletDto } from './dto/create-wallet.dto';
+import { IdempotencyKey } from './idempotency-key.decorator';
 
 interface AuthenticatedRequest {
   user: { userId: string; email: string; role: string };
 }
 
+@ApiTags('wallets')
+@ApiBearerAuth()
 @Controller('wallets')
 @UseGuards(JwtAuthGuard)
 export class WalletsController {
@@ -43,20 +47,24 @@ export class WalletsController {
   }
 
   @Post(':id/deposit')
+  @ApiHeader({ name: 'Idempotency-Key', required: false })
   deposit(
     @Request() req: AuthenticatedRequest,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: DepositDto,
+    @IdempotencyKey() idempotencyKey?: string,
   ) {
-    return this.wallets.deposit(req.user.userId, id, dto.amount);
+    return this.wallets.deposit(req.user.userId, id, dto.amount, idempotencyKey);
   }
 
   @Post(':id/withdraw')
+  @ApiHeader({ name: 'Idempotency-Key', required: false })
   withdraw(
     @Request() req: AuthenticatedRequest,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: WithdrawDto,
+    @IdempotencyKey() idempotencyKey?: string,
   ) {
-    return this.wallets.withdraw(req.user.userId, id, dto.amount);
+    return this.wallets.withdraw(req.user.userId, id, dto.amount, idempotencyKey);
   }
 }

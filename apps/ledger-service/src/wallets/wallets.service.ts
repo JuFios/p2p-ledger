@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { createHash, randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { Wallet } from './entities/wallet.entity';
 import { WalletBalance } from './entities/wallet-balance.entity';
@@ -18,7 +18,19 @@ import {
   withdrawPostings,
 } from '../ledger/domain/postings';
 import { Operation } from '../ledger/entities/operation.entity';
-import { OutboxMessage } from '../ledger/entities/outbox-message.entity';
+import {
+  commitChange,
+  currentTraceparent,
+  findCompletedOperation,
+  formatBalance,
+  hashRequest,
+  toState,
+} from '../ledger/ledger-writer';
+import {
+  ledgerConflict,
+  ledgerNotFound,
+  rethrowOperationConflict,
+} from '../ledger/ledger-errors';
 
 // Контракт відповіді стартера (balance рядком) + available/held/frozen.
 // balance = available + held: утримані під переказ гроші ще належать власнику.
@@ -49,12 +61,14 @@ function toView(wallet: Wallet, balance: WalletBalanceState): WalletView {
   };
 }
 
-function toState(balance: WalletBalance): WalletBalanceState {
-  return { available: BigInt(balance.available), held: BigInt(balance.held) };
-}
-
-function hashRequest(request: unknown): string {
-  return createHash('sha256').update(JSON.stringify(request)).digest('hex');
+// Для внутрішнього API (payments): без перевірки власника.
+export interface InternalWalletView {
+  walletId: string;
+  ownerId: string;
+  currency: string;
+  frozen: boolean;
+  available: string;
+  held: string;
 }
 
 @Injectable()
@@ -139,6 +153,68 @@ export class WalletsService {
     return toView(wallet, toState(balance));
   }
 
+  async getInternal(walletId: string): Promise<InternalWalletView> {
+    const wallet = await this.wallets.findOne({
+      where: { id: walletId },
+      relations: { balance: true },
+    });
+    if (!wallet) {
+      throw ledgerNotFound('Гаманець не знайдено');
+    }
+    return {
+      walletId: wallet.id,
+      ownerId: wallet.ownerId,
+      currency: wallet.currency,
+      frozen: wallet.frozen,
+      ...formatBalance(toState(wallet.balance)),
+    };
+  }
+
+  // Заморожений гаманець не приймає й не віддає гроші (крім зняття холду
+  // під час компенсації саги). Розморожування не передбачено.
+  async freeze(adminId: string, walletId: string): Promise<WalletView> {
+    return this.dataSource.transaction(async (manager) => {
+      const balance = await manager.findOne(WalletBalance, {
+        where: { walletId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!balance) {
+        throw ledgerNotFound('Гаманець не знайдено');
+      }
+      const wallet = await manager.findOneOrFail(Wallet, {
+        where: { id: walletId },
+      });
+      const state = toState(balance);
+      if (wallet.frozen) {
+        return toView(wallet, state);
+      }
+      await manager.update(Wallet, { id: walletId }, { frozen: true });
+      const view = toView({ ...wallet, frozen: true }, state);
+      await commitChange(manager, this.eventStore, {
+        streamId: walletId,
+        events: [
+          {
+            type: 'WalletFrozen',
+            payload: { walletId },
+            metadata: {
+              operationId: `freeze:${walletId}`,
+              actorUserId: adminId,
+              traceparent: currentTraceparent(),
+            },
+          },
+        ],
+        balances: { [walletId]: state },
+        operation: {
+          operationId: `freeze:${walletId}`,
+          type: 'freeze',
+          request: { walletId },
+          result: view,
+        },
+      });
+      return view;
+    });
+  }
+
   // Блокування рядка проєкції до кінця транзакції: усі записи по гаманцю
   // виконуються по черзі, баланс читається вже після попереднього коміту.
   private async lockOwned(
@@ -146,51 +222,60 @@ export class WalletsService {
     userId: string,
     walletId: string,
   ): Promise<LockedWallet> {
-    const wallet = await this.findOwned(manager, userId, walletId);
+    // Чужий гаманець → 404 ще до блокування.
+    await this.findOwned(manager, userId, walletId);
     const balance = await manager.findOneOrFail(WalletBalance, {
       where: { walletId },
       lock: { mode: 'pessimistic_write' },
     });
+    // frozen змінюється лише під цим самим блокуванням (freeze),
+    // тому гаманець перечитуємо вже після нього.
+    const wallet = await this.findOwned(manager, userId, walletId);
     return { wallet, balance: toState(balance) };
   }
 
+  // Idempotency-Key опційний (контракт стартера): без нього кожен запит —
+  // нова операція.
   async deposit(
     userId: string,
     walletId: string,
     amount: number,
+    idempotencyKey?: string,
   ): Promise<WalletView> {
     const amountMinor = toMinor(amount);
-    return this.dataSource.transaction(async (manager) => {
-      const locked = await this.lockOwned(manager, userId, walletId);
-      const { id, currency } = locked.wallet;
-      return this.record(manager, userId, locked, {
-        type: 'MoneyDeposited',
-        operation: 'deposit',
-        amountMinor,
-        postings: depositPostings(id, currency, amountMinor),
-      });
-    });
+    return this.dataSource
+      .transaction(async (manager) => {
+        const locked = await this.lockOwned(manager, userId, walletId);
+        const { id, currency } = locked.wallet;
+        return this.record(manager, userId, locked, idempotencyKey, {
+          type: 'MoneyDeposited',
+          operation: 'deposit',
+          amountMinor,
+          postings: depositPostings(id, currency, amountMinor),
+        });
+      })
+      .catch(rethrowOperationConflict);
   }
 
   async withdraw(
     userId: string,
     walletId: string,
     amount: number,
+    idempotencyKey?: string,
   ): Promise<WalletView> {
     const amountMinor = toMinor(amount);
-    return this.dataSource.transaction(async (manager) => {
-      const locked = await this.lockOwned(manager, userId, walletId);
-      if (locked.balance.available < amountMinor) {
-        throw new BadRequestException('Недостатньо коштів');
-      }
-      const { id, currency } = locked.wallet;
-      return this.record(manager, userId, locked, {
-        type: 'MoneyWithdrawn',
-        operation: 'withdraw',
-        amountMinor,
-        postings: withdrawPostings(id, currency, amountMinor),
-      });
-    });
+    return this.dataSource
+      .transaction(async (manager) => {
+        const locked = await this.lockOwned(manager, userId, walletId);
+        const { id, currency } = locked.wallet;
+        return this.record(manager, userId, locked, idempotencyKey, {
+          type: 'MoneyWithdrawn',
+          operation: 'withdraw',
+          amountMinor,
+          postings: withdrawPostings(id, currency, amountMinor),
+        });
+      })
+      .catch(rethrowOperationConflict);
   }
 
   // Одна транзакція: подія з проводками в event store, проєкція балансу,
@@ -199,6 +284,7 @@ export class WalletsService {
     manager: EntityManager,
     userId: string,
     { wallet, balance }: LockedWallet,
+    idempotencyKey: string | undefined,
     command: {
       type: 'MoneyDeposited' | 'MoneyWithdrawn';
       operation: string;
@@ -206,58 +292,62 @@ export class WalletsService {
       postings: Posting[];
     },
   ): Promise<WalletView> {
+    const request = {
+      walletId: wallet.id,
+      amountMinor: command.amountMinor.toString(),
+    };
+    const operationId = `${command.operation}:${userId}:${idempotencyKey ?? randomUUID()}`;
+    if (idempotencyKey) {
+      const done = await findCompletedOperation<WalletView>(
+        manager,
+        operationId,
+        request,
+      );
+      if (done) return done;
+    }
+    if (wallet.frozen) {
+      throw ledgerConflict('WALLET_FROZEN', 'Гаманець заморожено');
+    }
+    if (
+      command.type === 'MoneyWithdrawn' &&
+      balance.available < command.amountMinor
+    ) {
+      throw new BadRequestException('Недостатньо коштів');
+    }
     const after = applyPostings({ [wallet.id]: balance }, command.postings)[
       wallet.id
     ];
-    const operationId = `${command.operation}:${userId}:${randomUUID()}`;
-    const version = await this.eventStore.streamVersion(manager, wallet.id);
-    const [event] = await this.eventStore.append(manager, wallet.id, version, [
-      {
-        type: command.type,
-        payload: {
-          walletId: wallet.id,
-          currency: wallet.currency,
-          amountMinor: command.amountMinor.toString(),
-          postings: command.postings,
-        },
-        metadata: { operationId, actorUserId: userId },
-      },
-    ]);
-    await manager.update(
-      WalletBalance,
-      { walletId: wallet.id },
-      {
-        available: after.available.toString(),
-        held: after.held.toString(),
-        lastPosition: event.globalPosition,
-      },
-    );
-    await manager.insert(OutboxMessage, {
-      eventId: event.eventId,
-      type: command.type,
-      version: 1,
-      payload: {
-        walletId: wallet.id,
-        ownerId: wallet.ownerId,
-        currency: wallet.currency,
-        amount: formatMinor(command.amountMinor),
-        balanceAfter: {
-          available: formatMinor(after.available),
-          held: formatMinor(after.held),
-        },
-      },
-      userIds: [wallet.ownerId],
-      traceparent: null,
-    });
     const view = toView(wallet, after);
-    await manager.insert(Operation, {
-      operationId,
-      type: command.operation,
-      requestHash: hashRequest({
-        walletId: wallet.id,
-        amountMinor: command.amountMinor.toString(),
-      }),
-      result: view,
+    await commitChange(manager, this.eventStore, {
+      streamId: wallet.id,
+      events: [
+        {
+          type: command.type,
+          payload: {
+            walletId: wallet.id,
+            currency: wallet.currency,
+            amountMinor: command.amountMinor.toString(),
+            postings: command.postings,
+          },
+          metadata: {
+            operationId,
+            actorUserId: userId,
+            traceparent: currentTraceparent(),
+          },
+          publish: {
+            payload: {
+              walletId: wallet.id,
+              ownerId: wallet.ownerId,
+              currency: wallet.currency,
+              amount: formatMinor(command.amountMinor),
+              balanceAfter: formatBalance(after),
+            },
+            userIds: [wallet.ownerId],
+          },
+        },
+      ],
+      balances: { [wallet.id]: after },
+      operation: { operationId, type: command.operation, request, result: view },
     });
     return view;
   }
