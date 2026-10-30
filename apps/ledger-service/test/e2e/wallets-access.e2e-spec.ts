@@ -13,6 +13,7 @@ describe('Wallets access and input validation (e2e)', () => {
   let tokenA: string;
   let tokenB: string;
   let walletA: string;
+  let richWallet: string;
 
   beforeAll(async () => {
     app = await createApp();
@@ -20,6 +21,11 @@ describe('Wallets access and input validation (e2e)', () => {
     tokenB = (await registerUser(app)).token;
     walletA = (await createWallet(app, tokenA)).id;
     await deposit(app, tokenA, walletA, 100);
+
+    // Понад 1_000_001, щоб «недостатньо коштів» не маскувало перевірку @Max.
+    richWallet = (await createWallet(app, tokenB, 'EUR')).id;
+    await deposit(app, tokenB, richWallet, 1_000_000);
+    await deposit(app, tokenB, richWallet, 1_000_000);
   });
 
   afterAll(async () => {
@@ -68,12 +74,14 @@ describe('Wallets access and input validation (e2e)', () => {
       },
     );
 
-    // 1e20 тут не перевіряємо: його відхилила б і «недостатньо коштів» (теж 400).
-    it.each([0.001, 1_000_001, 1e-7, 5e-324, -1e-7])(
-      'withdraw з amount=%s → 400',
+    it.each([0.001, 1_000_001, 1e20, 1e-7, 5e-324, -1e-7])(
+      'withdraw з amount=%s → 400 навіть коли коштів достатньо',
       async (amount) => {
-        const res = await withdraw(app, tokenA, walletA, amount);
+        const res = await withdraw(app, tokenB, richWallet, amount);
         expect(res.status).toBe(400);
+        expect(res.body.message).toEqual(
+          expect.arrayContaining([expect.stringContaining('amount must be')]),
+        );
       },
     );
 
