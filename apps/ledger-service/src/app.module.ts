@@ -4,8 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
 import { WalletsModule } from './wallets/wallets.module';
 import { HealthModule } from './health/health.module';
-import { User } from './auth/entities/user.entity';
-import { Wallet } from './wallets/entities/wallet.entity';
+import { entities, migrations } from './data-source';
 
 @Module({
   imports: [
@@ -17,8 +16,11 @@ import { Wallet } from './wallets/entities/wallet.entity';
       username: process.env.DATABASE_USER,
       password: process.env.DATABASE_PASSWORD,
       database: process.env.DATABASE_NAME,
-      entities: [User, Wallet],
-      synchronize: true, // OK для стартового репо; у бойовому коді — міграції
+      entities,
+      // Схема — лише міграціями (src/migrations), застосовуються на старті.
+      synchronize: false,
+      migrations,
+      migrationsRun: true,
     }),
     AuthModule,
     WalletsModule,
