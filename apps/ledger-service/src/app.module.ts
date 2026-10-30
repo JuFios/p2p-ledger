@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AuthModule } from './auth/auth.module';
 import { WalletsModule } from './wallets/wallets.module';
 import { HealthModule } from './health/health.module';
 import { InternalModule } from './internal/internal.module';
 import { AdminModule } from './admin/admin.module';
+import { OutboxModule } from './outbox/outbox.module';
 import { entities, migrations } from './data-source';
 
 @Module({
@@ -24,11 +26,13 @@ import { entities, migrations } from './data-source';
       migrations,
       migrationsRun: true,
     }),
+    ScheduleModule.forRoot(),
     AuthModule,
     WalletsModule,
     HealthModule,
     InternalModule,
     AdminModule,
+    OutboxModule,
   ],
 })
 export class AppModule {}

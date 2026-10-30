@@ -67,6 +67,8 @@ services:
     depends_on:
       ledger-db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - '3001:3001'
     healthcheck:
