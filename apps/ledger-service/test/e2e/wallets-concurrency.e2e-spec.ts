@@ -20,7 +20,7 @@ describe('Wallets concurrency (e2e)', () => {
     await app.close();
   });
 
-  it('B1: паралельні withdraw не дають double spend', async () => {
+  it('паралельні withdraw не дають double spend', async () => {
     const { token } = await registerUser(app);
     const wallet = await createWallet(app, token);
     await deposit(app, token, wallet.id, 100);
@@ -36,7 +36,7 @@ describe('Wallets concurrency (e2e)', () => {
     expect(final.body.balance).toBe('0.00');
   });
 
-  it('B1: паралельні deposit не губляться (lost update)', async () => {
+  it('паралельні deposit не губляться (lost update)', async () => {
     const { token } = await registerUser(app);
     const wallet = await createWallet(app, token);
 

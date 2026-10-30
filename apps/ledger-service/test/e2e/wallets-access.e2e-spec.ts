@@ -32,7 +32,7 @@ describe('Wallets access and input validation (e2e)', () => {
     await app.close();
   });
 
-  describe('B2: чужий гаманець недоступний', () => {
+  describe('чужий гаманець недоступний', () => {
     it('GET чужого гаманця → 404', async () => {
       const res = await getWallet(app, tokenB, walletA);
       expect(res.status).toBe(404);
@@ -52,7 +52,7 @@ describe('Wallets access and input validation (e2e)', () => {
     });
   });
 
-  describe('B3: валідація вхідних даних', () => {
+  describe('валідація вхідних даних', () => {
     it.each(['get', 'deposit', 'withdraw'])(
       '%s з id, що не є UUID → 400',
       async (op) => {
