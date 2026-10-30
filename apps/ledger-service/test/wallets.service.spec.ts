@@ -11,7 +11,7 @@ describe('WalletsService', () => {
   let service: WalletsService;
   let manager: {
     findOne: jest.Mock;
-    findOneOrFail: jest.Mock;
+    find: jest.Mock;
     update: jest.Mock;
     insert: jest.Mock;
   };
@@ -26,11 +26,9 @@ describe('WalletsService', () => {
         frozen: false,
       }),
       // заблокований рядок проєкції: 100.00 доступно
-      findOneOrFail: jest.fn().mockResolvedValue({
-        walletId: 'wallet-1',
-        available: '10000',
-        held: '0',
-      }),
+      find: jest.fn().mockResolvedValue([
+        { walletId: 'wallet-1', available: '10000', held: '0' },
+      ]),
       update: jest.fn(),
       insert: jest.fn(),
     };
@@ -64,7 +62,7 @@ describe('WalletsService', () => {
     const result = await service.deposit('user-1', 'wallet-1', 50);
 
     // баланс читається під блокуванням рядка проєкції
-    expect(manager.findOneOrFail).toHaveBeenCalledWith(
+    expect(manager.find).toHaveBeenCalledWith(
       WalletBalance,
       expect.objectContaining({ lock: { mode: 'pessimistic_write' } }),
     );
@@ -116,7 +114,7 @@ describe('WalletsService', () => {
       Wallet,
       expect.objectContaining({ where: { id: 'wallet-1', ownerId: 'user-2' } }),
     );
-    expect(manager.findOneOrFail).not.toHaveBeenCalled();
+    expect(manager.find).not.toHaveBeenCalled();
     expect(eventStore.append).not.toHaveBeenCalled();
   });
 });

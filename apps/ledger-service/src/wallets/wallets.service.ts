@@ -24,6 +24,7 @@ import {
   findCompletedOperation,
   formatBalance,
   hashRequest,
+  lockBalances,
   toState,
 } from '../ledger/ledger-writer';
 import {
@@ -174,17 +175,13 @@ export class WalletsService {
   // під час компенсації саги). Розморожування не передбачено.
   async freeze(adminId: string, walletId: string): Promise<WalletView> {
     return this.dataSource.transaction(async (manager) => {
-      const balance = await manager.findOne(WalletBalance, {
-        where: { walletId },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!balance) {
+      const { [walletId]: state } = await lockBalances(manager, [walletId]);
+      if (!state) {
         throw ledgerNotFound('Гаманець не знайдено');
       }
       const wallet = await manager.findOneOrFail(Wallet, {
         where: { id: walletId },
       });
-      const state = toState(balance);
       if (wallet.frozen) {
         return toView(wallet, state);
       }
@@ -224,14 +221,11 @@ export class WalletsService {
   ): Promise<LockedWallet> {
     // Чужий гаманець → 404 ще до блокування.
     await this.findOwned(manager, userId, walletId);
-    const balance = await manager.findOneOrFail(WalletBalance, {
-      where: { walletId },
-      lock: { mode: 'pessimistic_write' },
-    });
+    const { [walletId]: balance } = await lockBalances(manager, [walletId]);
     // frozen змінюється лише під цим самим блокуванням (freeze),
     // тому гаманець перечитуємо вже після нього.
     const wallet = await this.findOwned(manager, userId, walletId);
-    return { wallet, balance: toState(balance) };
+    return { wallet, balance };
   }
 
   // Idempotency-Key опційний (контракт стартера): без нього кожен запит —
