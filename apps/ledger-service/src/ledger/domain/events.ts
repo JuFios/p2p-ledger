@@ -14,6 +14,15 @@ export const CURRENT_SCHEMA_VERSION: Record<string, number> = {
   WalletFrozen: 1,
 };
 
+// Події, що рухають гроші: без збалансованих проводок їх не записуємо.
+export const MONEY_EVENT_TYPES = new Set([
+  'MoneyDeposited',
+  'MoneyWithdrawn',
+  'HoldPlaced',
+  'HoldReleased',
+  'TransferCompleted',
+]);
+
 export interface EventMetadata {
   operationId: string;
   actorUserId?: string;

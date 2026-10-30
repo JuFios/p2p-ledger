@@ -4,6 +4,7 @@ import { EntityManager } from 'typeorm';
 import {
   CURRENT_SCHEMA_VERSION,
   EventMetadata,
+  MONEY_EVENT_TYPES,
   postingsOf,
 } from './domain/events';
 import { assertBalanced } from './domain/postings';
@@ -49,8 +50,9 @@ export class EventStore {
     const recorded: RecordedEvent[] = [];
     for (const [i, event] of events.entries()) {
       const postings = postingsOf(event.payload);
-      // Незбалансовані проводки → exception → транзакція не комітиться.
-      if (postings.length > 0) {
+      // Незбалансовані або відсутні в грошовій події проводки → exception →
+      // транзакція не комітиться.
+      if (postings.length > 0 || MONEY_EVENT_TYPES.has(event.type)) {
         assertBalanced(postings);
       }
       const eventId = randomUUID();
