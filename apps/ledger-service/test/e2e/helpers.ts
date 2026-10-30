@@ -11,7 +11,9 @@ export async function createApp(): Promise<INestApplication> {
   }).compile();
   const app = moduleRef.createNestApplication();
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  await app.init();
+  // Один спільний сервер: без listen supertest піднімає окремий на кожен запит,
+  // і паралельні запити впираються в ECONNRESET.
+  await app.listen(0);
   return app;
 }
 
