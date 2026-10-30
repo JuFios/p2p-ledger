@@ -1,8 +1,6 @@
-import { IsNumber, IsPositive, Max } from 'class-validator';
+import { IsMoneyAmount } from './is-money-amount';
 
 export class WithdrawDto {
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @IsPositive()
-  @Max(1_000_000)
+  @IsMoneyAmount()
   amount: number;
 }
