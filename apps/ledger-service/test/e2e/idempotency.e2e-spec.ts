@@ -39,9 +39,13 @@ describe('Idempotency-Key on deposit/withdraw (e2e)', () => {
     expect(second.body).toEqual(first.body);
     expect((await balanceOf(app, a)).balance).toBe('125.00');
 
+    // Без ідемпотентності другий withdraw(100) теж не змінив би баланс
+    // (недостатньо коштів), тому перевіряємо саме повтор результату.
     const w = randomUUID();
-    await send(a.token, a.walletId, 'withdraw', 100, w);
-    await send(a.token, a.walletId, 'withdraw', 100, w);
+    const firstWithdraw = await send(a.token, a.walletId, 'withdraw', 100, w);
+    const secondWithdraw = await send(a.token, a.walletId, 'withdraw', 100, w);
+    expect([firstWithdraw.status, secondWithdraw.status]).toEqual([201, 201]);
+    expect(secondWithdraw.body).toEqual(firstWithdraw.body);
     expect((await balanceOf(app, a)).balance).toBe('25.00');
   });
 

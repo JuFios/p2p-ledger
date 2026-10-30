@@ -6,7 +6,7 @@ const defaults: Record<string, string> = {
   DATABASE_PORT: '5433',
   DATABASE_USER: 'ledger',
   DATABASE_PASSWORD: 'ledger',
-  DATABASE_NAME: 'ledger',
+  DATABASE_NAME: 'ledger_e2e',
   JWT_ACCESS_SECRET: 'e2e-access-secret',
   JWT_REFRESH_SECRET: 'e2e-refresh-secret',
   REDIS_HOST: 'localhost',
