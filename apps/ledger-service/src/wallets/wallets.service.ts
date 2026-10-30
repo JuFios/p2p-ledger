@@ -32,10 +32,18 @@ export class WalletsService {
     return this.wallets.find({ where: { ownerId: userId } });
   }
 
-  // Чужий гаманець віддаємо як неіснуючий, щоб не розкривати його наявність.
-  async getById(userId: string, walletId: string): Promise<Wallet> {
-    const wallet = await this.wallets.findOne({
+  // Єдине місце правила власника. Чужий гаманець віддаємо як неіснуючий,
+  // щоб не розкривати його наявність. Із lock блокуємо рядок до кінця
+  // транзакції: паралельні запити виконуються по черзі.
+  private async findOwned(
+    userId: string,
+    walletId: string,
+    manager: EntityManager = this.wallets.manager,
+    lock = false,
+  ): Promise<Wallet> {
+    const wallet = await manager.findOne(Wallet, {
       where: { id: walletId, ownerId: userId },
+      ...(lock && { lock: { mode: 'pessimistic_write' as const } }),
     });
     if (!wallet) {
       throw new NotFoundException('Гаманець не знайдено');
@@ -43,29 +51,18 @@ export class WalletsService {
     return wallet;
   }
 
-  // Блокуємо рядок гаманця до кінця транзакції: паралельні запити
-  // виконуються по черзі, а арифметика йде в SQL над numeric, не через Number.
-  private async lockOwned(
-    manager: EntityManager,
-    userId: string,
-    walletId: string,
-  ): Promise<void> {
-    const wallet = await manager.findOne(Wallet, {
-      where: { id: walletId, ownerId: userId },
-      lock: { mode: 'pessimistic_write' },
-    });
-    if (!wallet) {
-      throw new NotFoundException('Гаманець не знайдено');
-    }
+  getById(userId: string, walletId: string): Promise<Wallet> {
+    return this.findOwned(userId, walletId);
   }
 
+  // Арифметика йде в SQL над numeric, не через Number.
   async deposit(
     userId: string,
     walletId: string,
     amount: number,
   ): Promise<Wallet> {
     return this.dataSource.transaction(async (manager) => {
-      await this.lockOwned(manager, userId, walletId);
+      await this.findOwned(userId, walletId, manager, true);
       await manager.query(
         'UPDATE wallets SET balance = balance + $1::numeric WHERE id = $2',
         [amount.toFixed(2), walletId],
@@ -80,7 +77,7 @@ export class WalletsService {
     amount: number,
   ): Promise<Wallet> {
     return this.dataSource.transaction(async (manager) => {
-      await this.lockOwned(manager, userId, walletId);
+      await this.findOwned(userId, walletId, manager, true);
       const [{ sufficient }] = await manager.query(
         'SELECT balance >= $1::numeric AS sufficient FROM wallets WHERE id = $2',
         [amount.toFixed(2), walletId],
