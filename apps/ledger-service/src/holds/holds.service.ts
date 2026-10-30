@@ -194,14 +194,18 @@ export class HoldsService {
     const request = { holdId, ...command };
     return this.dataSource
       .transaction(async (manager) => {
-        const { hold, balances } = await this.lockHold(manager, holdId, []);
+        const { hold: active, balances } = await this.lockHold(
+          manager,
+          holdId,
+          [],
+        );
         const done = await findCompletedOperation<HoldView>(
           manager,
           command.operationId,
           request,
         );
         if (done) return done;
-        const active = await this.activeHold(manager, hold.holdId);
+        assertActive(active);
 
         const wallet = await this.findWallet(manager, active.walletId);
         const amountMinor = BigInt(active.amountMinor);
@@ -283,19 +287,25 @@ export class HoldsService {
     const toAmountMinor = BigInt(command.toAmountMinor);
     return this.dataSource
       .transaction(async (manager) => {
-        const { balances } = await this.lockHold(manager, holdId, [
-          command.toWalletId,
-        ]);
+        const { hold: active, balances } = await this.lockHold(
+          manager,
+          holdId,
+          [command.toWalletId],
+        );
         const done = await findCompletedOperation<HoldView>(
           manager,
           command.operationId,
           request,
         );
         if (done) return done;
-        const active = await this.activeHold(manager, holdId);
+        assertActive(active);
 
         const sender = await this.findWallet(manager, active.walletId);
         const recipient = await this.findWallet(manager, command.toWalletId);
+        // Заморожений гаманець гроші не віддає; холд на ньому можна лише зняти.
+        if (sender.frozen) {
+          throw ledgerConflict('WALLET_FROZEN', 'Гаманець відправника заморожено');
+        }
         if (recipient.currency !== command.toCurrency) {
           throw ledgerConflict('CURRENCY_MISMATCH', 'Інша валюта отримувача');
         }
@@ -312,6 +322,20 @@ export class HoldsService {
         ) {
           throw new BadRequestException(
             'В одній валюті сума зарахування має дорівнювати сумі холду',
+          );
+        }
+        // Між валютами сума зарахування = сума холду × fxRate (±1 мінорна
+        // одиниця на округлення). Інакше різницю мовчки поглинули б
+        // system:fx:*, і звірка її не побачила б.
+        if (
+          sender.currency !== recipient.currency &&
+          Math.abs(
+            Number(toAmountMinor) -
+              Math.round(Number(amountMinor) * command.fxRate),
+          ) > 1
+        ) {
+          throw new BadRequestException(
+            'Сума зарахування не відповідає курсу fxRate',
           );
         }
         const postings = capturePostings(
@@ -393,19 +417,19 @@ export class HoldsService {
     return wallet;
   }
 
-  // Холд змінюється лише під блокуванням гаманця відправника, тож після
-  // lockBalances його стан актуальний.
+  // Холд змінюється лише під блокуванням гаманця відправника, тому його
+  // перечитуємо вже після lockBalances — повернений стан актуальний.
   private async lockHold(
     manager: EntityManager,
     holdId: string,
     otherWalletIds: string[],
   ): Promise<{ hold: Hold; balances: Balances }> {
-    const hold = await manager.findOne(Hold, { where: { holdId } });
-    if (!hold) {
+    const unlocked = await manager.findOne(Hold, { where: { holdId } });
+    if (!unlocked) {
       throw ledgerNotFound('Холд не знайдено');
     }
     const balances = await lockBalances(manager, [
-      hold.walletId,
+      unlocked.walletId,
       ...otherWalletIds,
     ]);
     for (const id of otherWalletIds) {
@@ -413,17 +437,13 @@ export class HoldsService {
         throw ledgerNotFound('Гаманець не знайдено');
       }
     }
+    const hold = await manager.findOneOrFail(Hold, { where: { holdId } });
     return { hold, balances };
   }
+}
 
-  private async activeHold(
-    manager: EntityManager,
-    holdId: string,
-  ): Promise<Hold> {
-    const hold = await manager.findOneOrFail(Hold, { where: { holdId } });
-    if (hold.status !== 'ACTIVE') {
-      throw ledgerConflict('HOLD_NOT_ACTIVE', `Холд уже ${hold.status}`);
-    }
-    return hold;
+function assertActive(hold: Hold): void {
+  if (hold.status !== 'ACTIVE') {
+    throw ledgerConflict('HOLD_NOT_ACTIVE', `Холд уже ${hold.status}`);
   }
 }

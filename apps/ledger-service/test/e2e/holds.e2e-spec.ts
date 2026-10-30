@@ -169,6 +169,28 @@ describe('Holds (e2e)', () => {
     expect(late.body.code).toBe('HOLD_NOT_ACTIVE');
   });
 
+  it('повтор з іншим порядком полів дає той самий результат, а не 422', async () => {
+    const a = await account(app);
+    const b = await account(app, 'USD', 0);
+    const reversed = (body: object) =>
+      Object.fromEntries(Object.entries(body).reverse());
+    const first = await placeHold(app, a, '3000');
+    const again = await internal(app).post('/internal/holds', reversed(first.body));
+    expect([again.status, again.body]).toEqual([201, first.res.body]);
+
+    const body = {
+      operationId: `transfer:${first.holdId}:capture`,
+      toWalletId: b.walletId,
+      toAmountMinor: '3000',
+      toCurrency: 'USD',
+      fxRate: 1,
+    };
+    const url = `/internal/holds/${first.holdId}/capture`;
+    await internal(app).post(url, body).expect(200);
+    await internal(app).post(url, reversed(body)).expect(200);
+    expect((await balanceOf(app, b)).balance).toBe('30.00');
+  });
+
   it('паралельні дублі однієї команди виконуються один раз', async () => {
     const a = await account(app);
     const transferId = randomUUID();
@@ -224,6 +246,47 @@ describe('Holds (e2e)', () => {
       available: '100.00',
       held: '0.00',
     });
+  });
+
+  it('capture із замороженого гаманця відправника → WALLET_FROZEN, held лишається', async () => {
+    const a = await account(app);
+    const b = await account(app, 'USD', 0);
+    const { holdId } = await placeHold(app, a, '3000');
+    await freeze(app, admin, a.walletId).then((r) => expect(r.status).toBe(200));
+
+    const res = await capture(app, holdId, b, '3000');
+    expect([res.status, res.body.code]).toEqual([409, 'WALLET_FROZEN']);
+    expect(await balanceOf(app, a)).toEqual({
+      balance: '100.00',
+      available: '70.00',
+      held: '30.00',
+    });
+    expect((await balanceOf(app, b)).balance).toBe('0.00');
+    // Компенсація на замороженому гаманці проходить.
+    await release(app, holdId, 'WALLET_FROZEN').then((r) =>
+      expect(r.status).toBe(200),
+    );
+    expect((await balanceOf(app, a)).available).toBe('100.00');
+  });
+
+  it('міжвалютна сума зарахування має відповідати курсу', async () => {
+    const a = await account(app);
+    const b = await account(app, 'EUR', 0);
+    const { holdId } = await placeHold(app, a, '5000');
+
+    const res = await capture(app, holdId, b, '999999999', {
+      toCurrency: 'EUR',
+      fxRate: 0.92,
+    });
+    expect(res.status).toBe(400);
+    expect((await balanceOf(app, b)).balance).toBe('0.00');
+    expect((await balanceOf(app, a)).held).toBe('50.00');
+
+    // Розбіжність округлення в одну мінорну одиницю допустима.
+    await capture(app, holdId, b, '4601', { toCurrency: 'EUR', fxRate: 0.92 }).then(
+      (r) => expect(r.status).toBe(200),
+    );
+    expect((await balanceOf(app, b)).balance).toBe('46.01');
   });
 
   it('конкурентні холди не дають овердрафту', async () => {
