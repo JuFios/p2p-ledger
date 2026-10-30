@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { WalletsService } from '../src/wallets/wallets.service';
@@ -38,12 +39,14 @@ describe('WalletsService', () => {
   });
 
   it('does not allow withdrawing more than the current balance', async () => {
+    expect.assertions(2);
     walletsRepo.findOne.mockResolvedValueOnce({
       id: 'wallet-1',
       balance: '100.00',
     });
-    service
-      .withdraw('wallet-1', 500)
-      .catch((err) => expect(err).toBeDefined());
+    await expect(service.withdraw('wallet-1', 500)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(walletsRepo.save).not.toHaveBeenCalled();
   });
 });
