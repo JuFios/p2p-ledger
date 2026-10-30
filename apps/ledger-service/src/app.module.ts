@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
 import { WalletsModule } from './wallets/wallets.module';
+import { HealthModule } from './health/health.module';
 import { User } from './auth/entities/user.entity';
 import { Wallet } from './wallets/entities/wallet.entity';
 
@@ -21,6 +22,7 @@ import { Wallet } from './wallets/entities/wallet.entity';
     }),
     AuthModule,
     WalletsModule,
+    HealthModule,
   ],
 })
 export class AppModule {}

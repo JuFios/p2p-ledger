@@ -1,7 +1,6 @@
-import { IsNumber, IsPositive } from 'class-validator';
+import { IsMoneyAmount } from './is-money-amount';
 
 export class WithdrawDto {
-  @IsNumber()
-  @IsPositive()
+  @IsMoneyAmount()
   amount: number;
 }

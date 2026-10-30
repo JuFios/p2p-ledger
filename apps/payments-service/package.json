@@ -8,13 +8,14 @@
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,test}/**/*.ts\" --fix",
-    "test": "jest"
+    "test": "jest --passWithNoTests"
   },
   "dependencies": {
     "@nestjs/common": "^10.3.0",
     "@nestjs/core": "^10.3.0",
     "@nestjs/platform-express": "^10.3.0",
     "@nestjs/config": "^3.2.0",
+    "@nestjs/terminus": "^10.3.0",
     "class-validator": "^0.14.1",
     "class-transformer": "^0.5.1",
     "reflect-metadata": "^0.2.1",

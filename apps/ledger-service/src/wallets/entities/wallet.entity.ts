@@ -3,10 +3,12 @@ import {
   Entity,
   ManyToOne,
   PrimaryGeneratedColumn,
+  Unique,
 } from 'typeorm';
 import { User } from '../../auth/entities/user.entity';
 
 @Entity('wallets')
+@Unique(['ownerId', 'currency'])
 export class Wallet {
   @PrimaryGeneratedColumn('uuid')
   id: string;

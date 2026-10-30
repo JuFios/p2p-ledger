@@ -11,6 +11,53 @@ services:
       - '5433:5432'
     volumes:
       - ledger-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ledger -d ledger']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  payments-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: payments
+      POSTGRES_PASSWORD: payments
+      POSTGRES_DB: payments
+    ports:
+      - '5434:5432'
+    volumes:
+      - payments-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U payments -d payments']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  notifications-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: notifications
+      POSTGRES_PASSWORD: notifications
+      POSTGRES_DB: notifications
+    ports:
+      - '5435:5432'
+    volumes:
+      - notifications-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U notifications -d notifications']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   ledger-service:
     build: ./apps/ledger-service
@@ -18,9 +65,15 @@ services:
     environment:
       DATABASE_HOST: ledger-db
     depends_on:
-      - ledger-db
+      ledger-db:
+        condition: service_healthy
     ports:
       - '3001:3001'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3001/health || exit 1']
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   payments-service:
     build: ./apps/payments-service
@@ -29,12 +82,22 @@ services:
       - ledger-service
     ports:
       - '3002:3002'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3002/health || exit 1']
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   notifications-service:
     build: ./apps/notifications-service
     env_file: ./apps/notifications-service/.env.example
     ports:
       - '3003:3003'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3003/health || exit 1']
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   frontend:
     build: ./apps/frontend
@@ -50,3 +113,5 @@ services:
 
 volumes:
   ledger-db-data:
+  payments-db-data:
+  notifications-db-data:
