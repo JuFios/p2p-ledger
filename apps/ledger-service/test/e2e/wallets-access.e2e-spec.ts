@@ -60,7 +60,7 @@ describe('Wallets access and input validation (e2e)', () => {
       },
     );
 
-    it.each([0.001, 10.999, 1e20, 1_000_001])(
+    it.each([0.001, 10.999, 1e20, 1_000_001, 1e-7, 5e-324, -1e-7])(
       'deposit з amount=%s → 400',
       async (amount) => {
         const res = await deposit(app, tokenA, walletA, amount);
@@ -69,7 +69,7 @@ describe('Wallets access and input validation (e2e)', () => {
     );
 
     // 1e20 тут не перевіряємо: його відхилила б і «недостатньо коштів» (теж 400).
-    it.each([0.001, 1_000_001])(
+    it.each([0.001, 1_000_001, 1e-7, 5e-324, -1e-7])(
       'withdraw з amount=%s → 400',
       async (amount) => {
         const res = await withdraw(app, tokenA, walletA, amount);
