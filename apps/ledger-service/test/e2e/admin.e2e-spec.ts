@@ -2,7 +2,8 @@ import { INestApplication } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
-import { createApp, deposit, withdraw } from './helpers';
+import { AdminSeedService } from '../../src/admin/admin-seed.service';
+import { createApp, deposit, registerUser, withdraw } from './helpers';
 import {
   account,
   Account,
@@ -42,6 +43,35 @@ describe('Admin (e2e)', () => {
       await call().set('Authorization', `Bearer ${a.token}`).expect(403);
     }
     expect((await balanceOf(app, a)).balance).toBe('100.00');
+  });
+
+  it('сід адміна: роль admin лише в ADMIN_EMAIL, сесію незмінного адміна не обриває', async () => {
+    const server = app.getHttpServer();
+    const dataSource = app.get(DataSource);
+    const stale = await registerUser(app);
+    await dataSource.query(`UPDATE users SET role = 'admin' WHERE email = $1`, [
+      stale.email,
+    ]);
+    const session = await request(server)
+      .post('/auth/login')
+      .send({
+        email: process.env.ADMIN_EMAIL,
+        password: process.env.ADMIN_PASSWORD,
+      })
+      .expect(201);
+
+    // Повторний старт сервісу з тими самими env.
+    await app.get(AdminSeedService).onApplicationBootstrap();
+
+    const [{ role }] = await dataSource.query(
+      'SELECT role FROM users WHERE email = $1',
+      [stale.email],
+    );
+    expect(role).toBe('user');
+    await request(server)
+      .post('/auth/refresh')
+      .send({ refreshToken: session.body.refreshToken })
+      .expect(201);
   });
 
   it('event-лог гаманця хронологічний, payload у поточній версії схеми', async () => {
