@@ -25,7 +25,12 @@ export const REDIS = Symbol('REDIS');
 export class RedisModule implements OnApplicationShutdown {
   constructor(@Inject(REDIS) private readonly redis: Redis) {}
 
+  // Без з'єднання QUIT чекав би таймауту команди й падав, тож розриваємо одразу.
   async onApplicationShutdown() {
-    await this.redis.quit();
+    if (this.redis.status !== 'ready') {
+      this.redis.disconnect();
+      return;
+    }
+    await this.redis.quit().catch(() => this.redis.disconnect());
   }
 }
