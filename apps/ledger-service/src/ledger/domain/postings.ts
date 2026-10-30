@@ -152,6 +152,14 @@ export type Balances = Record<string, WalletBalanceState>;
 
 const WALLET_ACCOUNT = /^wallet:(.+):(available|held)$/;
 
+// Гаманці, чиї рахунки зачіпають проводки.
+export function walletIdsOf(postings: Posting[]): string[] {
+  const ids = postings
+    .map((p) => WALLET_ACCOUNT.exec(p.account)?.[1])
+    .filter((id): id is string => id !== undefined);
+  return [...new Set(ids)];
+}
+
 // Баланс рахунку гаманця = Σ CREDIT − Σ DEBIT. Системні рахунки в проєкцію
 // гаманців не входять. Перевірку на від'ємний баланс робить викликач.
 export function applyPostings(

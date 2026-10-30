@@ -1,6 +1,9 @@
 import { DomainEvent } from '../../src/ledger/domain/events';
 import {
+  capturePostings,
   depositPostings,
+  holdPostings,
+  releasePostings,
   withdrawPostings,
 } from '../../src/ledger/domain/postings';
 import { projectBalances } from '../../src/ledger/domain/projection';
@@ -72,5 +75,44 @@ describe('projectBalances', () => {
         },
       ]),
     ).toEqual({ [W]: { available: 0n, held: 0n } });
+  });
+
+  it('холд переносить кошти в held, capture списує їх на користь отримувача', () => {
+    const R = 'w-2';
+    const opened = (walletId: string) => ({
+      type: 'WalletOpened',
+      schemaVersion: 1,
+      payload: { walletId, ownerId: 'u', currency: 'USD' },
+    });
+    const withPostings = (type: string, postings: unknown) => ({
+      type,
+      schemaVersion: 1,
+      payload: { postings },
+    });
+    const events = [
+      opened(W),
+      opened(R),
+      moved('MoneyDeposited', 2, 10000n),
+      withPostings('HoldPlaced', holdPostings(W, 'USD', 3000n)),
+      withPostings('HoldPlaced', holdPostings(W, 'USD', 2000n)),
+      withPostings('HoldReleased', releasePostings(W, 'USD', 2000n)),
+      withPostings(
+        'TransferCompleted',
+        capturePostings(
+          { walletId: W, currency: 'USD', amountMinor: 3000n },
+          { walletId: R, currency: 'USD', amountMinor: 3000n },
+        ),
+      ),
+    ];
+    const expected = {
+      [W]: { available: 7000n, held: 0n },
+      [R]: { available: 3000n, held: 0n },
+    };
+    expect(projectBalances(events)).toEqual(expected);
+    // Згортка порціями (як у reconciliation) дає той самий результат.
+    const firstHalf = projectBalances(events.slice(0, 4));
+    expect(projectBalances(events.slice(4), firstHalf)).toEqual(expected);
+    // Початковий стан не мутується.
+    expect(firstHalf[W]).toEqual({ available: 7000n, held: 3000n });
   });
 });
