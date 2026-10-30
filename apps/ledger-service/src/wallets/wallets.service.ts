@@ -14,14 +14,18 @@ export class WalletsService {
     private readonly dataSource: DataSource,
   ) {}
 
+  // UNIQUE(ownerId, currency) + ON CONFLICT DO NOTHING: паралельні виклики
+  // не створюють дублікатів і всі отримують один і той самий гаманець.
   async getOrCreateForUser(userId: string, currency = 'USD'): Promise<Wallet> {
-    let wallet = await this.wallets.findOne({ where: { ownerId: userId, currency } });
-    if (!wallet) {
-      wallet = await this.wallets.save(
-        this.wallets.create({ ownerId: userId, currency, balance: '0' }),
-      );
-    }
-    return wallet;
+    await this.wallets
+      .createQueryBuilder()
+      .insert()
+      .values({ ownerId: userId, currency, balance: '0' })
+      .orIgnore()
+      .execute();
+    return this.wallets.findOneOrFail({
+      where: { ownerId: userId, currency },
+    });
   }
 
   async listForUser(userId: string): Promise<Wallet[]> {
