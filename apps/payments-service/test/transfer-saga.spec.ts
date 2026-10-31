@@ -264,6 +264,7 @@ describe('TransferSaga', () => {
         result.id,
         `transfer:${result.id}:release`,
         'RECIPIENT_FROZEN',
+        result.fromWalletId,
       );
     });
 
