@@ -5,9 +5,11 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { AuthUser } from '../auth/jwt.strategy';
+import { blockedEmails } from '../common/blocked-emails';
 import { toMinor } from '../common/money';
 import { LedgerClient, LedgerUser } from '../ledger/ledger.client';
 import { LedgerRejection, LedgerUnavailable } from '../ledger/ledger-errors';
@@ -33,17 +35,35 @@ export class SplitBillsService {
     private readonly dataSource: DataSource,
     private readonly ledger: LedgerClient,
     private readonly transfers: TransfersService,
+    private readonly config: ConfigService,
   ) {}
 
   // Учасники — користувачі ledger за email. Ініціатор учасником бути не може:
   // його частка — це переказ самому собі, а такі переказ відхиляє.
   async create(user: AuthUser, dto: CreateSplitBillDto): Promise<SplitBillView> {
     const dueAt = dto.dueAt ? new Date(dto.dueAt) : null;
+    // Тижневий, порядковий і базовий формати ISO 8601 валідатор пропускає,
+    // а Date їх не розбирає.
+    if (dueAt && Number.isNaN(dueAt.getTime())) {
+      throw badRequest(
+        'INVALID_DUE_DATE',
+        'dueAt: дата або дата-час ISO 8601 (YYYY-MM-DD, YYYY-MM-DDTHH:mm:ssZ)',
+      );
+    }
     if (dueAt && dueAt.getTime() <= Date.now()) {
       throw badRequest('DUE_DATE_IN_PAST', 'dueAt має бути в майбутньому');
     }
     const totalMinor = toMinor(dto.totalAmount);
-    const customAmounts = this.customAmounts(dto, totalMinor);
+    const amounts =
+      this.customAmounts(dto, totalMinor) ??
+      splitEqually(totalMinor, dto.participants.length);
+    if (!amounts) {
+      throw badRequest(
+        'SHARE_TOO_SMALL',
+        'Сума рахунку замала, щоб розділити її між учасниками',
+      );
+    }
+    this.assertPayable(user.email, dto, amounts);
 
     const users = await Promise.all(
       dto.participants.map((participant) => this.resolveUser(participant.email)),
@@ -58,15 +78,6 @@ export class SplitBillsService {
         'Ініціатор не може бути учасником власного рахунку',
       );
     }
-    const amounts =
-      customAmounts ?? splitEqually(totalMinor, users.length);
-    if (!amounts) {
-      throw badRequest(
-        'SHARE_TOO_SMALL',
-        'Сума рахунку замала, щоб розділити її між учасниками',
-      );
-    }
-
     return this.dataSource.transaction(async (manager) => {
       const bill = await manager.save(
         manager.create(SplitBill, {
@@ -228,6 +239,31 @@ export class SplitBillsService {
       .where(this.visibleTo, { userId })
       .orderBy('bill.createdAt', 'DESC')
       .addOrderBy('share.position', 'ASC');
+  }
+
+  // Частку, яку сага однаково відхилить (понад ліміт переказу, чорний
+  // список), не створюємо: її не вдалося б сплатити, а рахунок ніколи б не
+  // став SETTLED.
+  private assertPayable(
+    creatorEmail: string,
+    dto: CreateSplitBillDto,
+    amounts: bigint[],
+  ) {
+    const max = toMinor(this.config.getOrThrow<number>('TRANSFER_MAX_AMOUNT'));
+    if (amounts.some((amount) => amount > max)) {
+      throw badRequest(
+        'SHARE_LIMIT_EXCEEDED',
+        'Частка перевищує ліміт одного переказу',
+      );
+    }
+    const blocked = blockedEmails(this.config);
+    const emails = [creatorEmail, ...dto.participants.map((p) => p.email)];
+    if (emails.some((email) => blocked.has(email.toLowerCase()))) {
+      throw badRequest(
+        'BLOCKED_PARTICIPANT',
+        'Ініціатор або учасник у чорному списку: частки не можна сплатити',
+      );
+    }
   }
 
   // CUSTOM: кожен учасник має суму, разом — рівно totalAmount. EQUAL: сум немає.

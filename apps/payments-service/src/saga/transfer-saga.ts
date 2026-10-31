@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { blockedEmails } from '../common/blocked-emails';
 import { toMinor } from '../common/money';
 import { convertMinor, FxService } from '../fx/fx.service';
 import { LedgerClient } from '../ledger/ledger.client';
@@ -207,13 +208,7 @@ export class TransferSaga {
     if (BigInt(transfer.amountMinor) > max) {
       return { type: 'rejected', reason: 'LIMIT_EXCEEDED' };
     }
-    const blocked = new Set(
-      this.config
-        .get<string>('BLOCKED_EMAILS', '')
-        .split(',')
-        .map((email) => email.trim().toLowerCase())
-        .filter(Boolean),
-    );
+    const blocked = blockedEmails(this.config);
     const sender = transfer.senderEmail.toLowerCase();
     const recipient = transfer.recipientEmail.toLowerCase();
     if (blocked.has(sender) || blocked.has(recipient)) {
