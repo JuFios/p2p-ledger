@@ -118,12 +118,14 @@ export class TransfersService {
     return { created: false, transfer: toTransferView(existing) };
   }
 
-  // Переказ бачать лише відправник і отримувач; іншим — 404, як і неіснуючий.
+  // Відправник бачить переказ завжди, отримувач — лише після зарахування
+  // (невдалий чи незавершений переказ його не стосується); іншим — 404,
+  // як і неіснуючий.
   async getForUser(userId: string, id: string): Promise<TransferView> {
     const transfer = await this.dataSource.manager.findOne(Transfer, {
       where: [
         { id, senderUserId: userId },
-        { id, recipientUserId: userId },
+        { id, recipientUserId: userId, status: 'COMPLETED' },
       ],
     });
     if (!transfer) {
@@ -134,7 +136,10 @@ export class TransfersService {
 
   async listForUser(userId: string, limit = 20): Promise<TransferView[]> {
     const transfers = await this.dataSource.manager.find(Transfer, {
-      where: [{ senderUserId: userId }, { recipientUserId: userId }],
+      where: [
+        { senderUserId: userId },
+        { recipientUserId: userId, status: 'COMPLETED' },
+      ],
       order: { createdAt: 'DESC' },
       take: limit,
     });
