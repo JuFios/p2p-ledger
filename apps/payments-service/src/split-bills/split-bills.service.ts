@@ -180,17 +180,31 @@ export class SplitBillsService {
       billId,
       shareId,
     );
+    const params = {
+      fromWalletId: dto.fromWalletId,
+      recipientEmail: share.bill.creatorEmail,
+      amountMinor: share.amountMinor,
+      currency: share.bill.currency,
+      toCurrency: share.bill.currency,
+      splitShareId: share.id,
+    };
+    // Повтор уже виконаної оплати віддаємо з БД: ledger для цього не потрібен.
+    const replay = await this.transfers.findReplay(
+      this.dataSource.manager,
+      user.userId,
+      idempotencyKey,
+      params,
+    );
+    if (replay) return replay;
     await this.checkWallet(user.userId, dto.fromWalletId, share.bill.currency);
 
     return this.dataSource.transaction(async (manager) => {
-      const result = await this.transfers.insert(manager, user, idempotencyKey, {
-        fromWalletId: dto.fromWalletId,
-        recipientEmail: share.bill.creatorEmail,
-        amountMinor: share.amountMinor,
-        currency: share.bill.currency,
-        toCurrency: share.bill.currency,
-        splitShareId: share.id,
-      });
+      const result = await this.transfers.insert(
+        manager,
+        user,
+        idempotencyKey,
+        params,
+      );
       if (!result.created) return result;
 
       const claimed = await manager.update(

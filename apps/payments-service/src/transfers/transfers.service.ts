@@ -63,14 +63,7 @@ export class TransfersService {
     idempotencyKey: string,
     params: NewTransfer,
   ): Promise<CreateTransferResult> {
-    const requestHash = hashRequest({
-      fromWalletId: params.fromWalletId,
-      toWalletIdentifier: params.recipientEmail,
-      amountMinor: params.amountMinor,
-      currency: params.currency,
-      toCurrency: params.toCurrency,
-      ...(params.splitShareId ? { splitShareId: params.splitShareId } : {}),
-    });
+    const requestHash = this.hashOf(params);
     const inserted = await manager
       .createQueryBuilder()
       .insert()
@@ -109,6 +102,26 @@ export class TransfersService {
       senderUserId: user.userId,
       idempotencyKey,
     });
+    return this.replay(existing, requestHash);
+  }
+
+  // Повтор запиту, який уже виконано: переказ за (відправник, ключ), якщо він
+  // є. Не вимагає ні ledger, ні блокувань. Той самий ключ з іншими
+  // параметрами — 422.
+  async findReplay(
+    manager: EntityManager,
+    userId: string,
+    idempotencyKey: string,
+    params: NewTransfer,
+  ): Promise<CreateTransferResult | null> {
+    const existing = await manager.findOneBy(Transfer, {
+      senderUserId: userId,
+      idempotencyKey,
+    });
+    return existing ? this.replay(existing, this.hashOf(params)) : null;
+  }
+
+  private replay(existing: Transfer, requestHash: string): CreateTransferResult {
     if (existing.requestHash !== requestHash) {
       throw new UnprocessableEntityException({
         code: 'IDEMPOTENCY_KEY_REUSED',
@@ -116,6 +129,17 @@ export class TransfersService {
       });
     }
     return { created: false, transfer: toTransferView(existing) };
+  }
+
+  private hashOf(params: NewTransfer): string {
+    return hashRequest({
+      fromWalletId: params.fromWalletId,
+      toWalletIdentifier: params.recipientEmail,
+      amountMinor: params.amountMinor,
+      currency: params.currency,
+      toCurrency: params.toCurrency,
+      ...(params.splitShareId ? { splitShareId: params.splitShareId } : {}),
+    });
   }
 
   // Відправник бачить переказ завжди, отримувач — лише після зарахування
