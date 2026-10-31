@@ -338,6 +338,30 @@ describe('TransferSaga', () => {
       const result = await runSaga(createSaga(ledger), newTransfer());
       expect(result.status).toBe('COMPLETED');
     });
+
+    // Release уже виконано, але з іншим тілом запиту (напр. до появи walletId):
+    // ledger відповідає 422 на кожен повтор — стан визначаємо за холдом.
+    it.each([
+      ['RELEASED', 'FAILED'],
+      ['CAPTURED', 'COMPLETED'],
+    ])('release: ключ операції вже використано, холд %s → %s без нескінченних повторів', async (hold, status) => {
+      const ledger = ledgerMock();
+      ledger.captureHold.mockRejectedValue(rejection('RECIPIENT_FROZEN'));
+      ledger.releaseHold.mockRejectedValue(rejection('IDEMPOTENCY_KEY_REUSED', 422));
+      ledger.getHold.mockResolvedValue({ holdId: 'h', status: hold });
+      const result = await runSaga(createSaga(ledger), newTransfer());
+      expect(result.status).toBe(status);
+      expect(ledger.releaseHold).toHaveBeenCalledTimes(1);
+    });
+
+    it('release: холду так і не було (лише слід зняття) → FAILED', async () => {
+      const ledger = ledgerMock();
+      ledger.captureHold.mockRejectedValue(rejection('RECIPIENT_FROZEN'));
+      ledger.releaseHold.mockRejectedValue(rejection('IDEMPOTENCY_KEY_REUSED', 422));
+      ledger.getHold.mockRejectedValue(rejection('NOT_FOUND', 404));
+      const result = await runSaga(createSaga(ledger), newTransfer());
+      expect(result).toMatchObject({ status: 'FAILED', failureReason: 'RECIPIENT_FROZEN' });
+    });
   });
 
   describe('невизначений результат (5xx, таймаут, breaker open)', () => {
