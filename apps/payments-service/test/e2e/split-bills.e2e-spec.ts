@@ -195,7 +195,7 @@ describe('Split-рахунки: створення, перегляд, підтв
     const rows = (ownerId: string) =>
       app.get(DataSource).query(
         `SELECT
-           (SELECT count(*)::int FROM split_bills WHERE creator_user_id = $1) AS bills,
+           (SELECT count(*)::int FROM split_bills WHERE creator_user_id::text = $1) AS bills,
            (SELECT count(*)::int FROM outbox
              WHERE type = 'SplitBillCreated' AND payload->>'creatorUserId' = $1) AS events`,
         [ownerId],

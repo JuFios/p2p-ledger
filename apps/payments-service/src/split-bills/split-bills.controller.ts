@@ -15,7 +15,10 @@ import { ApiBearerAuth, ApiHeader, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { AuthUser } from '../auth/jwt.strategy';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { IdempotencyKey } from '../common/idempotency-key.decorator';
+import {
+  IdempotencyKey,
+  OptionalIdempotencyKey,
+} from '../common/idempotency-key.decorator';
 import { TransferThrottlerGuard } from '../transfers/transfer-throttler.guard';
 import { CreateSplitBillDto } from './dto/create-split-bill.dto';
 import { ListSplitBillsQueryDto } from './dto/list-split-bills.dto';
@@ -33,9 +36,23 @@ interface AuthenticatedRequest {
 export class SplitBillsController {
   constructor(private readonly bills: SplitBillsService) {}
 
+  // 201 — рахунок створено; повтор з тим самим Idempotency-Key (необов'язковим)
+  // — 200 і той самий рахунок.
   @Post()
-  create(@Request() req: AuthenticatedRequest, @Body() dto: CreateSplitBillDto) {
-    return this.bills.create(req.user, dto);
+  @ApiHeader({ name: 'Idempotency-Key', required: false })
+  async create(
+    @Request() req: AuthenticatedRequest,
+    @OptionalIdempotencyKey() idempotencyKey: string | undefined,
+    @Body() dto: CreateSplitBillDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { created, bill } = await this.bills.create(
+      req.user,
+      dto,
+      idempotencyKey,
+    );
+    res.status(created ? 201 : 200);
+    return bill;
   }
 
   @Get()

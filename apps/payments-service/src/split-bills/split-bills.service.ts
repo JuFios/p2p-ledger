@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
@@ -11,6 +12,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import { AuthUser } from '../auth/jwt.strategy';
 import { blockedEmails } from '../common/blocked-emails';
 import { toMinor } from '../common/money';
+import { hashRequest } from '../common/request-hash';
 import { LedgerClient, LedgerUser } from '../ledger/ledger.client';
 import { LedgerRejection, LedgerUnavailable } from '../ledger/ledger-errors';
 import { OutboxMessage } from '../outbox/outbox-message.entity';
@@ -26,6 +28,11 @@ import { splitBillCreated } from './split-events';
 import { splitEqually } from './split-math';
 import { SplitBillView, toSplitBillView } from './split-bill-view';
 
+export interface CreateSplitBillResult {
+  created: boolean;
+  bill: SplitBillView;
+}
+
 const badRequest = (code: string, message: string) =>
   new BadRequestException({ code, message });
 
@@ -40,7 +47,23 @@ export class SplitBillsService {
 
   // Учасники — користувачі ledger за email. Ініціатор учасником бути не може:
   // його частка — це переказ самому собі, а такі переказ відхиляє.
-  async create(user: AuthUser, dto: CreateSplitBillDto): Promise<SplitBillView> {
+  // Idempotency-Key необов'язковий: з ключем повтор віддає той самий рахунок
+  // (до перевірок і ledger: запит, що вже виконано, не має знову залежати від
+  // часу чи чорного списку), без ключа кожен запит створює новий рахунок.
+  async create(
+    user: AuthUser,
+    dto: CreateSplitBillDto,
+    idempotencyKey?: string,
+  ): Promise<CreateSplitBillResult> {
+    const requestHash = idempotencyKey ? this.hashOf(dto) : null;
+    if (idempotencyKey) {
+      const existing = await this.findByKey(
+        this.dataSource.manager,
+        user.userId,
+        idempotencyKey,
+      );
+      if (existing) return this.replay(existing, requestHash as string);
+    }
     const dueAt = dto.dueAt ? new Date(dto.dueAt) : null;
     // Тижневий, порядковий і базовий формати ISO 8601 валідатор пропускає,
     // а Date їх не розбирає.
@@ -79,8 +102,13 @@ export class SplitBillsService {
       );
     }
     return this.dataSource.transaction(async (manager) => {
-      const bill = await manager.save(
-        manager.create(SplitBill, {
+      // ON CONFLICT по (creator_user_id, idempotency_key): паралельний дубль
+      // чекає на коміт першого запиту й читає вже створений рахунок.
+      const inserted = await manager
+        .createQueryBuilder()
+        .insert()
+        .into(SplitBill)
+        .values({
           id: randomUUID(),
           creatorUserId: user.userId,
           creatorEmail: user.email,
@@ -89,8 +117,23 @@ export class SplitBillsService {
           currency: dto.currency,
           mode: dto.mode,
           dueAt,
-        }),
-      );
+          idempotencyKey: idempotencyKey ?? null,
+          requestHash,
+        })
+        .orIgnore()
+        .returning('id')
+        .execute();
+      if (inserted.raw.length === 0) {
+        const existing = await this.findByKey(
+          manager,
+          user.userId,
+          idempotencyKey as string,
+        );
+        return this.replay(existing as SplitBill, requestHash as string);
+      }
+      const bill = await manager.findOneByOrFail(SplitBill, {
+        id: inserted.raw[0].id,
+      });
       const shares = await manager.save(
         users.map((participant, index) =>
           manager.create(SplitShare, {
@@ -106,7 +149,43 @@ export class SplitBillsService {
       );
       await manager.save(OutboxMessage, splitBillCreated(bill, shares));
       bill.shares = shares;
-      return toSplitBillView(bill);
+      return { created: true, bill: toSplitBillView(bill) };
+    });
+  }
+
+  private findByKey(manager: EntityManager, userId: string, key: string) {
+    return manager.findOne(SplitBill, {
+      where: { creatorUserId: userId, idempotencyKey: key },
+      relations: { shares: true },
+    });
+  }
+
+  private replay(existing: SplitBill, requestHash: string): CreateSplitBillResult {
+    if (existing.requestHash !== requestHash) {
+      throw new UnprocessableEntityException({
+        code: 'IDEMPOTENCY_KEY_REUSED',
+        message: 'Ключ ідемпотентності вже використано з іншими параметрами',
+      });
+    }
+    return { created: false, bill: toSplitBillView(existing) };
+  }
+
+  // Хеш за вмістом запиту (суми — в мінорних одиницях, порядок учасників
+  // істотний: від нього залежить, кому дістанеться залишок).
+  private hashOf(dto: CreateSplitBillDto): string {
+    return hashRequest({
+      title: dto.title,
+      totalMinor: toMinor(dto.totalAmount).toString(),
+      currency: dto.currency,
+      mode: dto.mode,
+      dueAt: dto.dueAt ?? null,
+      participants: dto.participants.map((participant) => ({
+        email: participant.email,
+        amountMinor:
+          participant.amount === undefined
+            ? null
+            : toMinor(participant.amount).toString(),
+      })),
     });
   }
 

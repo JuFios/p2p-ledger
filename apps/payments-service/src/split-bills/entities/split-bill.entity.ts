@@ -17,6 +17,10 @@ export type SplitMode = (typeof SPLIT_MODES)[number];
 // з часток (aggregateBillStatus), тож розійтись з ними не може.
 @Entity('split_bills')
 @Index(['creatorUserId', 'createdAt'])
+// Створення рахунку з Idempotency-Key; без ключа (NULL) рахунки незалежні.
+@Index(['creatorUserId', 'idempotencyKey'], { unique: true })
+// Воркер прострочених часток шукає лише рахунки з терміном.
+@Index(['dueAt'], { where: '"due_at" IS NOT NULL' })
 @Check(`"total_minor" > 0`)
 @Check(`"mode" IN ('EQUAL', 'CUSTOM')`)
 export class SplitBill {
@@ -28,6 +32,12 @@ export class SplitBill {
 
   @Column({ name: 'creator_email', type: 'varchar' })
   creatorEmail: string;
+
+  @Column({ name: 'idempotency_key', type: 'varchar', length: 128, nullable: true })
+  idempotencyKey: string | null;
+
+  @Column({ name: 'request_hash', type: 'varchar', length: 64, nullable: true })
+  requestHash: string | null;
 
   @Column({ type: 'varchar', length: 100 })
   title: string;
