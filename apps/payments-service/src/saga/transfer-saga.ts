@@ -202,7 +202,9 @@ export class TransferSaga {
     }
   }
 
-  // Мок-правила: ліміт суми, чорний список, переказ самому собі.
+  // Мок-правила: ліміт суми, чорний список. Переказ самому собі відхиляє
+  // RESOLVE_RECIPIENT за userId: ledger розрізняє email за регістром, тож
+  // порівняння рядків відхилило б переказ між двома різними акаунтами.
   private riskCheck(transfer: Transfer): StepResult {
     const max = toMinor(this.config.getOrThrow<number>('TRANSFER_MAX_AMOUNT'));
     if (BigInt(transfer.amountMinor) > max) {
@@ -213,9 +215,6 @@ export class TransferSaga {
     const recipient = transfer.recipientEmail.toLowerCase();
     if (blocked.has(sender) || blocked.has(recipient)) {
       return { type: 'rejected', reason: 'BLOCKED' };
-    }
-    if (sender === recipient) {
-      return { type: 'rejected', reason: 'SELF_TRANSFER' };
     }
     return { type: 'next' };
   }

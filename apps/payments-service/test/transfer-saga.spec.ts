@@ -165,11 +165,6 @@ describe('TransferSaga', () => {
         { recipientEmail: 'Blocked@example.com' },
         'BLOCKED',
       ],
-      [
-        'RISK_CHECK: собі',
-        { recipientEmail: 'SENDER@example.com' },
-        'SELF_TRANSFER',
-      ],
     ])('%s', async (_name, overrides, reason) => {
       const ledger = ledgerMock();
       const result = await runSaga(createSaga(ledger), newTransfer(overrides));
@@ -196,7 +191,7 @@ describe('TransferSaga', () => {
       expect(ledger.releaseHold).not.toHaveBeenCalled();
     });
 
-    it('RESOLVE_RECIPIENT: email іншого регістру, але той самий користувач', async () => {
+    it('RESOLVE_RECIPIENT: отримувач — сам відправник (за userId) → SELF_TRANSFER', async () => {
       const ledger = ledgerMock();
       ledger.findUserByEmail.mockResolvedValue({
         userId: SENDER,
@@ -208,6 +203,18 @@ describe('TransferSaga', () => {
         failureReason: 'SELF_TRANSFER',
       });
       expect(ledger.placeHold).not.toHaveBeenCalled();
+    });
+
+    it('email відрізняється лише регістром, а акаунт інший (ledger розрізняє регістр) → переказ іде далі', async () => {
+      const ledger = ledgerMock();
+      // Відправник — sender@example.com; Sender@example.com у ledger — інший користувач.
+      const result = await runSaga(
+        createSaga(ledger),
+        newTransfer({ recipientEmail: 'Sender@example.com' }),
+      );
+      expect(result).toMatchObject({ status: 'COMPLETED' });
+      expect(ledger.findUserByEmail).toHaveBeenCalledWith('Sender@example.com');
+      expect(ledger.captureHold).toHaveBeenCalledTimes(1);
     });
 
     it('FX_QUOTE: сума після конвертації менша за мінорну одиницю', async () => {
