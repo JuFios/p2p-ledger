@@ -10,6 +10,7 @@ import {
   createUser,
   getSplitBill,
   postSplitBill,
+  tokenFor,
 } from './helpers';
 
 describe('Split-рахунки: створення, перегляд, підтвердження (e2e)', () => {
@@ -117,6 +118,11 @@ describe('Split-рахунки: створення, перегляд, підтв
       [{ dueAt: '2020-01-01T00:00:00Z', participants: [{ email: a.email }] }, 'DUE_DATE_IN_PAST'],
       [{ dueAt: '2099-02-31T00:00:00Z', participants: [{ email: a.email }] }, undefined],
       [{ dueAt: 'tomorrow', participants: [{ email: a.email }] }, undefined],
+      // Коректні для ISO 8601, але не розбираються в дату (тижневий, порядковий, базовий формат).
+      [{ dueAt: '2099-W45', participants: [{ email: a.email }] }, 'INVALID_DUE_DATE'],
+      [{ dueAt: '2099-W45-3', participants: [{ email: a.email }] }, 'INVALID_DUE_DATE'],
+      [{ dueAt: '2099-100', participants: [{ email: a.email }] }, 'INVALID_DUE_DATE'],
+      [{ dueAt: '20991105', participants: [{ email: a.email }] }, 'INVALID_DUE_DATE'],
       [{ participants: [] }, undefined],
       [{ participants: [{ email: 'not-an-email' }] }, undefined],
       [{ currency: 'GBP', participants: [{ email: a.email }] }, undefined],
@@ -128,6 +134,61 @@ describe('Split-рахунки: створення, перегляд, підтв
       const res = await postSplitBill(app, owner.token, bill(overrides)).expect(400);
       if (code) expect(res.body.code).toBe(code);
     }
+  });
+
+  it('частка понад ліміт переказу або чорний список → 400, рахунок не створено', async () => {
+    const owner = createUser(ledger);
+    const a = createUser(ledger);
+    const blockedUser = ledger.addUser('blocked@example.com');
+    const blocked = { ...blockedUser, token: tokenFor(blockedUser) };
+    const created = () =>
+      app
+        .get(DataSource)
+        .query(`SELECT count(*)::int AS n FROM split_bills WHERE creator_user_id = ANY($1)`, [
+          [owner.userId, blocked.userId],
+        ]);
+
+    // Частка 50 000 / 1 > TRANSFER_MAX_AMOUNT (10 000): оплата завжди б завершувалась відмовою.
+    const tooBig = await postSplitBill(
+      app,
+      owner.token,
+      bill({ totalAmount: 50000, participants: [{ email: a.email }] }),
+    ).expect(400);
+    expect(tooBig.body.code).toBe('SHARE_LIMIT_EXCEEDED');
+    // Рівно на межі — можна.
+    await postSplitBill(
+      app,
+      owner.token,
+      bill({ totalAmount: 10000, participants: [{ email: a.email }] }),
+    ).expect(201);
+    // CUSTOM: ліміт діє на кожну частку окремо.
+    const b = createUser(ledger);
+    await postSplitBill(
+      app,
+      owner.token,
+      bill({
+        mode: 'CUSTOM',
+        totalAmount: 20000,
+        participants: [
+          { email: a.email, amount: 10001 },
+          { email: b.email, amount: 9999 },
+        ],
+      }),
+    ).expect(400);
+
+    const blockedParticipant = await postSplitBill(
+      app,
+      owner.token,
+      bill({ participants: [{ email: blocked.email }] }),
+    ).expect(400);
+    expect(blockedParticipant.body.code).toBe('BLOCKED_PARTICIPANT');
+    const blockedCreator = await postSplitBill(
+      app,
+      blocked.token,
+      bill({ participants: [{ email: a.email }] }),
+    ).expect(400);
+    expect(blockedCreator.body.code).toBe('BLOCKED_PARTICIPANT');
+    expect((await created())[0].n).toBe(1);
   });
 
   it('ledger недоступний → 503, рахунок не створено', async () => {
