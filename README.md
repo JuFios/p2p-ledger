@@ -13,8 +13,6 @@
 
 ## Що ще НЕ реалізовано
 
-- `apps/payments-service` — split-рахунки (сага переказу вже працює, див.
-  «Сага переказу»).
 - `apps/notifications-service` — порожній Nest-проєкт, лише `/health`.
 - Форма переказу, split-рахунки, admin-екран на фронтенді.
 
@@ -75,6 +73,19 @@ curl -s -X POST http://localhost:3002/transfers \
   -H 'Content-Type: application/json' \
   -d "{\"fromWalletId\":\"$WALLET\",\"toWalletIdentifier\":\"bob@example.com\",\"amount\":10,\"currency\":\"USD\",\"toCurrency\":\"EUR\"}"
 ```
+
+## Split-рахунки (payments-service)
+
+Ініціатор створює груповий рахунок: загальна сума, валюта, учасники (за email) і частки. Кожен учасник підтверджує свою частку й сплачує її окремим переказом на email ініціатора — тією самою сагою, що й звичайний переказ. Swagger — http://localhost:3002/docs.
+
+- `POST /split-bills` `{ title, totalAmount, currency, mode, participants: [{ email, amount? }], dueAt? }` → `201`. `mode: EQUAL` — порівну, залишок мінорних одиниць (копійок) отримує перший учасник (100.00 / 3 → 33.34, 33.33, 33.33); `CUSTOM` — суму кожного задає ініціатор, їх сума має дорівнювати `totalAmount`, інакше `400 SHARES_SUM_MISMATCH`. До 20 учасників; учасник — зареєстрований користувач (інакше `400 PARTICIPANT_NOT_FOUND`), без повторів. **Ініціатор не може бути учасником** (`SELF_PARTICIPANT`): його частка була б переказом самому собі, а такі переказ відхиляє.
+- `GET /split-bills`, `GET /split-bills/:id` — рахунок бачать ініціатор і учасники, іншим — `404`.
+- `POST /split-bills/:id/shares/:shareId/accept` — учасник підтверджує свою частку (`PENDING → ACCEPTED`); чужа частка → `404`, повторне підтвердження → `409`.
+- `POST /split-bills/:id/shares/:shareId/pay` `{ fromWalletId }` + `Idempotency-Key` — створює переказ-оплату (`202`, повтор з тим самим ключем — `200` і той самий переказ). Лише для `ACCEPTED`: без `accept` → `409`. Гаманець має належати платнику (інакше `404`) і бути у валюті рахунку (`400 CURRENCY_MISMATCH`) — так не потрібна зворотна конвертація суми. Rate limit — той самий, що й на `POST /transfers` (за `userId`).
+- **Статуси.** Частка: `PENDING → ACCEPTED → PAYING → PAID`; якщо переказ завершився `FAILED`, частка повертається в `ACCEPTED` і її можна сплатити знову. Статус рахунку не зберігається, а виводиться з часток: жодної `PAID` — `PENDING`, частина — `PARTIALLY_PAID`, усі — `SETTLED` (`ACCEPTED`/`PAYING` його не змінюють — гроші ще не надійшли).
+- **Без подвійної оплати.** Переказ вставляється першим, потім умовний `UPDATE split_shares … WHERE status = 'ACCEPTED'` у тій самій транзакції. Два паралельні `pay` з **різними** ключами: другий програє `UPDATE` → `409`, і його переказ відкочується разом з транзакцією. З **однаковими** ключами — один переказ (`ON CONFLICT`). Хеш запиту включає частку, тож ключ звичайного переказу не можна повторно використати для оплати частки (`422`). Перехід частки при фіналі саги (`COMPLETED → PAID`, `FAILED → ACCEPTED`) виконується в тій самій транзакції, що й фінальний статус переказу.
+- **Прострочені частки.** `dueAt` (необов'язковий, у майбутньому) — термін оплати рахунку. Воркер `split-overdue` (`@nestjs/schedule`, `FOR UPDATE SKIP LOCKED`) для часток у `PENDING`/`ACCEPTED` після терміну пише в outbox `SplitShareOverdue` (адресат — власник частки), але не частіше ніж раз на `SPLIT_REMINDER_INTERVAL_MS` на частку (`last_reminded_at`). Частка в `PAYING` не нагадується. Рахунок без `dueAt` ніколи не прострочується.
+- **Події.** `SplitBillCreated` (учасникам, у тій самій транзакції, що й рахунок) і `SplitShareOverdue` йдуть через outbox у `stream:payments-events`; оплата частки видна як `TransferStatusChanged`.
 
 ## Тести
 
@@ -154,4 +165,4 @@ cd apps/ledger-service && npm run test:e2e
 - `app.module.ts` — валідація env, TypeORM з міграціями, планувальник фонових задач, throttler; `main.ts` — Swagger на `/docs`, `enableShutdownHooks()` (saga runner і outbox relay завершуються коректно), порт через `ConfigService`; `nest-cli.json` — плагін `@nestjs/swagger`.
 - `health` — перевіряє БД і стан Redis (як у ledger: недоступний Redis — деградація, а не відмова).
 - `package.json` — `npm test` без `--passWithNoTests`, додано `test:e2e` і скрипти міграцій; `npm test` не запускає `test/e2e`.
-- `.env.example` — нові змінні саги, БД і Redis. `docker-compose.yml`: payments-service чекає на здорові `payments-db` і `redis` (на ledger — як і раніше, лише старт контейнера: недоступний ledger сага пережидає ретраями). CI: для payments піднімаються Postgres і Redis, запускаються e2e.
+- `.env.example` — нові змінні саги, нагадувань split-рахунків, БД і Redis. `docker-compose.yml`: payments-service чекає на здорові `payments-db` і `redis` (на ledger — як і раніше, лише старт контейнера: недоступний ledger сага пережидає ретраями). CI: для payments піднімаються Postgres і Redis, запускаються e2e.
