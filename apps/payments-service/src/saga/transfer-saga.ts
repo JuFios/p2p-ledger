@@ -319,14 +319,32 @@ export class TransferSaga {
         // Гаманця немає, отже й холду — повертати нічого.
         return { type: 'compensated' };
       }
-      if (error.code === 'HOLD_NOT_ACTIVE') {
-        const hold = await this.ledger.getHold(transfer.id);
-        return hold.status === 'CAPTURED'
-          ? { type: 'completed' }
-          : { type: 'compensated' };
+      // Холд уже не активний або release з цим operationId уже виконано з
+      // іншим тілом (422 повторювався б вічно): результат — за станом холду.
+      if (
+        error.code === 'HOLD_NOT_ACTIVE' ||
+        error.code === 'IDEMPOTENCY_KEY_REUSED'
+      ) {
+        return this.holdOutcome(transfer);
       }
       // Компенсацію не кидаємо: повторюємо, доки ledger її не прийме.
       return { type: 'uncertain', error: `${error.code}: ${error.message}` };
     }
+  }
+
+  private async holdOutcome(transfer: Transfer): Promise<StepResult> {
+    let status;
+    try {
+      ({ status } = await this.ledger.getHold(transfer.id));
+    } catch (error) {
+      // Холду так і не було (лишився лише слід зняття) — повертати нічого.
+      if (error instanceof LedgerRejection && error.code === 'NOT_FOUND') {
+        return { type: 'compensated' };
+      }
+      throw error;
+    }
+    if (status === 'CAPTURED') return { type: 'completed' };
+    if (status === 'RELEASED') return { type: 'compensated' };
+    return { type: 'uncertain', error: 'Холд досі ACTIVE' };
   }
 }
