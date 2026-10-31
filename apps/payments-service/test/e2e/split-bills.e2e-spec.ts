@@ -115,6 +115,8 @@ describe('Split-рахунки: створення, перегляд, підтв
       [{ mode: 'CUSTOM', participants: [{ email: a.email }] }, 'AMOUNT_REQUIRED'],
       [{ totalAmount: 0.01, participants: [{ email: a.email }, { email: b.email }] }, 'SHARE_TOO_SMALL'],
       [{ dueAt: '2020-01-01T00:00:00Z', participants: [{ email: a.email }] }, 'DUE_DATE_IN_PAST'],
+      [{ dueAt: '2099-02-31T00:00:00Z', participants: [{ email: a.email }] }, undefined],
+      [{ dueAt: 'tomorrow', participants: [{ email: a.email }] }, undefined],
       [{ participants: [] }, undefined],
       [{ participants: [{ email: 'not-an-email' }] }, undefined],
       [{ currency: 'GBP', participants: [{ email: a.email }] }, undefined],

@@ -3,9 +3,9 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
-  IsDateString,
   IsEmail,
   IsIn,
+  IsISO8601,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -55,7 +55,8 @@ export class CreateSplitBillDto {
   participants: SplitParticipantDto[];
 
   // Термін оплати; частки, не сплачені до нього, вважаються простроченими.
+  // strict: інакше 2026-02-31 пройшло б перевірку й зсунулось на 3 березня.
   @IsOptional()
-  @IsDateString()
+  @IsISO8601({ strict: true })
   dueAt?: string;
 }
