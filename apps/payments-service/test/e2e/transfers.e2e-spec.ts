@@ -91,6 +91,57 @@ describe('Сага переказу (e2e)', () => {
     expect(sender.wallet.available).toBe(9000n);
   });
 
+  // FakeLedger відхиляє зарахування, що не збігається з курсом (±1 мінорна
+  // одиниця), як справжній ledger: сума від payments має його проходити.
+  it.each([
+    ['USD', 'UAH', 10, '415.00', 41500n],
+    ['UAH', 'USD', 1000, '24.09', 2409n],
+    ['EUR', 'UAH', 10, '451.08', 45108n],
+  ])('міжвалютний переказ %s → %s проходить правило курсу ledger', async (from, to, amount, toAmount, credited) => {
+    const sender = createUser(ledger, from, 10_000_00n);
+    const recipient = createUser(ledger, to);
+    const res = await postTransfer(app, sender.token, {
+      fromWalletId: sender.wallet.walletId,
+      toWalletIdentifier: recipient.email,
+      amount,
+      currency: from,
+      toCurrency: to,
+    }).expect(202);
+    const done = await waitForStatus(app, sender.token, res.body.id);
+    expect(done).toMatchObject({ status: 'COMPLETED', toAmount, toCurrency: to });
+    expect(recipient.wallet.available).toBe(credited);
+  });
+
+  it('відправника заморожено після холду: capture відхилено, холд знято, кошти повернулись', async () => {
+    const sender = createUser(ledger, 'USD', 10000n);
+    const recipient = createUser(ledger, 'USD');
+    const placeHold = ledger['place'].bind(ledger);
+    ledger['place'] = (body: Record<string, string>) => {
+      const result = placeHold(body);
+      sender.wallet.frozen = true;
+      return result;
+    };
+    try {
+      const res = await postTransfer(app, sender.token, {
+        fromWalletId: sender.wallet.walletId,
+        toWalletIdentifier: recipient.email,
+        amount: 40,
+        currency: 'USD',
+      }).expect(202);
+      const done = await waitForStatus(app, sender.token, res.body.id);
+      expect(done).toMatchObject({
+        status: 'FAILED',
+        step: 'RELEASE_HOLD',
+        failureReason: 'WALLET_FROZEN',
+      });
+      expect(sender.wallet).toMatchObject({ available: 10000n, held: 0n });
+      expect(recipient.wallet.available).toBe(0n);
+    } finally {
+      ledger['place'] = placeHold;
+      sender.wallet.frozen = false;
+    }
+  });
+
   it('недостатньо коштів: FAILED на холді, баланс не змінився', async () => {
     const sender = createUser(ledger, 'USD', 500n);
     const recipient = createUser(ledger, 'USD');

@@ -200,9 +200,23 @@ export class FakeLedger {
     if (hold.status !== 'ACTIVE') throw conflict('HOLD_NOT_ACTIVE');
     const recipient = this.wallets.get(body.toWalletId);
     if (!recipient) throw notFound();
+    const sender = this.wallets.get(hold.walletId)!;
+    // Ті самі перевірки й порядок, що в справжньому ledger.
+    if (sender.frozen) throw conflict('WALLET_FROZEN');
     if (recipient.currency !== body.toCurrency) throw conflict('CURRENCY_MISMATCH');
     if (recipient.frozen) throw conflict('RECIPIENT_FROZEN');
-    const sender = this.wallets.get(hold.walletId)!;
+    const toAmount = BigInt(body.toAmountMinor);
+    if (sender.currency === recipient.currency && toAmount !== hold.amountMinor) {
+      throw new HttpError(400, { message: 'В одній валюті суми мають збігатись' });
+    }
+    // Між валютами: сума зарахування = сума холду × fxRate з точністю ±1.
+    const expected = Math.round(Number(hold.amountMinor) * Number(body.fxRate));
+    if (
+      sender.currency !== recipient.currency &&
+      Math.abs(Number(toAmount) - expected) > 1
+    ) {
+      throw new HttpError(400, { message: 'Сума зарахування не відповідає курсу' });
+    }
     sender.held -= hold.amountMinor;
     recipient.available += BigInt(body.toAmountMinor);
     hold.status = 'CAPTURED';
