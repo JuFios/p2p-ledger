@@ -329,6 +329,28 @@ describe('Holds (e2e)', () => {
     expect((await balanceOf(app, a)).held).toBe('0.00');
   });
 
+  it('release з walletId чужого гаманця для наявного холду → 400, холд не знято', async () => {
+    const a = await account(app);
+    const b = await account(app);
+    const transferId = randomUUID();
+    await placeHold(app, a, '3000', {
+      holdId: transferId,
+      transferId,
+      operationId: `transfer:${transferId}:hold`,
+    });
+    const res = await release(
+      app,
+      transferId,
+      'RETRIES_EXHAUSTED',
+      `transfer:${transferId}:release`,
+      b.walletId,
+    );
+    expect(res.status).toBe(400);
+    expect((await balanceOf(app, a)).held).toBe('30.00');
+    const hold = await internal(app).get(`/internal/holds/${transferId}`).expect(200);
+    expect(hold.body.status).toBe('ACTIVE');
+  });
+
   it('release невідомого холду з walletId лишає слід: пізній place → 409, кошти не заблоковано', async () => {
     const a = await account(app);
     const transferId = randomUUID();
