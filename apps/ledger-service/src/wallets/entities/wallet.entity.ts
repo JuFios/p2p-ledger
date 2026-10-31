@@ -1,30 +1,33 @@
 import {
   Column,
+  CreateDateColumn,
   Entity,
-  ManyToOne,
-  PrimaryGeneratedColumn,
+  OneToOne,
+  PrimaryColumn,
   Unique,
 } from 'typeorm';
-import { User } from '../../auth/entities/user.entity';
+import { WalletBalance } from './wallet-balance.entity';
 
+// Реєстр гаманців. Баланс — не поле, а проєкція подій (WalletBalance).
+// Зв'язку з User немає: власник — лише ownerId (межа між auth і ledger).
 @Entity('wallets')
 @Unique(['ownerId', 'currency'])
 export class Wallet {
-  @PrimaryGeneratedColumn('uuid')
+  @PrimaryColumn('uuid')
   id: string;
 
-  @ManyToOne(() => User, (user) => user.wallets)
-  owner: User;
-
-  @Column()
+  @Column({ name: 'owner_id', type: 'uuid' })
   ownerId: string;
 
-  @Column({ default: 'USD' })
+  @Column({ type: 'char', length: 3 })
   currency: string;
 
-  // NOTE (стартовий код): баланс зберігається як просте поле, яке
-  // оновлюється напряму. Це навмисне спрощення для старту проєкту —
-  // дивись ТЗ щодо event sourcing / CQRS.
-  @Column('numeric', { precision: 18, scale: 2, default: 0 })
-  balance: string;
+  @Column({ default: false })
+  frozen: boolean;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt: Date;
+
+  @OneToOne(() => WalletBalance, (balance) => balance.wallet)
+  balance: WalletBalance;
 }

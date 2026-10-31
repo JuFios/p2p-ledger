@@ -11,7 +11,12 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand"
+    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
+    "typeorm": "typeorm-ts-node-commonjs -d src/data-source.ts",
+    "migration:generate": "npm run typeorm -- migration:generate",
+    "migration:run": "npm run typeorm -- migration:run",
+    "migration:revert": "npm run typeorm -- migration:revert",
+    "reconcile": "ts-node src/reconcile.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.3.0",
@@ -22,6 +27,11 @@
     "@nestjs/passport": "^10.0.3",
     "@nestjs/typeorm": "^10.0.2",
     "@nestjs/terminus": "^10.3.0",
+    "@nestjs/schedule": "^4.1.2",
+    "@nestjs/swagger": "^7.4.2",
+    "@nestjs/throttler": "^6.7.1",
+    "@opentelemetry/api": "~1.9.0",
+    "ioredis": "^5.11.1",
     "typeorm": "^0.3.20",
     "pg": "^8.11.3",
     "passport": "^0.7.0",
