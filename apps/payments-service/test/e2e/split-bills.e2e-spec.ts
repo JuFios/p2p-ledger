@@ -250,14 +250,24 @@ describe('Split-рахунки: створення, перегляд, підтв
       const key = randomUUID();
       const body = bill({
         participants: [{ email: a.email }],
-        dueAt: new Date(Date.now() + 400).toISOString(),
+        dueAt: new Date(Date.now() + 60_000).toISOString(),
       });
       const first = await postSplitBill(app, owner.token, body, key).expect(201);
-      await new Promise((resolve) => setTimeout(resolve, 600));
-      ledger.down = true;
-      // Той самий запит тепер не пройшов би перевірку «dueAt у майбутньому».
-      const repeat = await postSplitBill(app, owner.token, body, key).expect(200);
-      expect(repeat.body.id).toBe(first.body.id);
+      // «Через дві хвилини»: термін з тіла запиту вже минув (токен ще чинний).
+      const now = Date.now();
+      const clock = jest.spyOn(Date, 'now').mockReturnValue(now + 120_000);
+      try {
+        ledger.down = true;
+        // Той самий запит тепер не пройшов би перевірку «dueAt у майбутньому».
+        const repeat = await postSplitBill(app, owner.token, body, key).expect(200);
+        expect(repeat.body.id).toBe(first.body.id);
+      } finally {
+        clock.mockRestore();
+        // Рахунок з терміном не лишаємо в спільній БД: інакше він прострочиться.
+        await app
+          .get(DataSource)
+          .query('UPDATE split_bills SET due_at = NULL WHERE id = $1', [first.body.id]);
+      }
     });
 
     it('без ключа запити незалежні: два рахунки', async () => {
