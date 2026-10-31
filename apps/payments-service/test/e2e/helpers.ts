@@ -84,11 +84,13 @@ export function postSplitBill(
   app: INestApplication,
   token: string,
   body: Record<string, unknown>,
+  idempotencyKey?: string,
 ) {
-  return request(app.getHttpServer())
+  const req = request(app.getHttpServer())
     .post('/split-bills')
-    .set('Authorization', `Bearer ${token}`)
-    .send(body);
+    .set('Authorization', `Bearer ${token}`);
+  if (idempotencyKey) req.set('Idempotency-Key', idempotencyKey);
+  return req.send(body);
 }
 
 export function getSplitBill(app: INestApplication, token: string, id: string) {

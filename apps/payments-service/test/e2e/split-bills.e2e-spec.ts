@@ -191,6 +191,93 @@ describe('Split-рахунки: створення, перегляд, підтв
     expect((await created())[0].n).toBe(1);
   });
 
+  describe('Idempotency-Key (необов\'язковий)', () => {
+    const rows = (ownerId: string) =>
+      app.get(DataSource).query(
+        `SELECT
+           (SELECT count(*)::int FROM split_bills WHERE creator_user_id = $1) AS bills,
+           (SELECT count(*)::int FROM outbox
+             WHERE type = 'SplitBillCreated' AND payload->>'creatorUserId' = $1) AS events`,
+        [ownerId],
+      );
+
+    it('повтор з тим самим ключем → 200 і той самий рахунок, без дубліка й другої події', async () => {
+      const owner = createUser(ledger);
+      const a = createUser(ledger);
+      const key = randomUUID();
+      const body = bill({ participants: [{ email: a.email }] });
+      const first = await postSplitBill(app, owner.token, body, key).expect(201);
+      const repeat = await postSplitBill(app, owner.token, body, key).expect(200);
+      expect(repeat.body.id).toBe(first.body.id);
+      expect((await rows(owner.userId))[0]).toEqual({ bills: 1, events: 1 });
+    });
+
+    it('20 паралельних запитів з одним ключем → один рахунок', async () => {
+      const owner = createUser(ledger);
+      const a = createUser(ledger);
+      const key = randomUUID();
+      const body = bill({ participants: [{ email: a.email }] });
+      const responses = await Promise.all(
+        Array.from({ length: 20 }, () => postSplitBill(app, owner.token, body, key)),
+      );
+      expect(responses.map((r) => r.status).sort((x, y) => x - y)).toEqual([
+        ...Array(19).fill(200),
+        201,
+      ]);
+      expect(new Set(responses.map((r) => r.body.id)).size).toBe(1);
+      expect((await rows(owner.userId))[0]).toEqual({ bills: 1, events: 1 });
+    });
+
+    it('той самий ключ з іншим тілом → 422; ключ іншого користувача незалежний', async () => {
+      const owner = createUser(ledger);
+      const other = createUser(ledger);
+      const a = createUser(ledger);
+      const key = randomUUID();
+      await postSplitBill(app, owner.token, bill({ participants: [{ email: a.email }] }), key).expect(201);
+      const reused = await postSplitBill(
+        app,
+        owner.token,
+        bill({ totalAmount: 99, participants: [{ email: a.email }] }),
+        key,
+      ).expect(422);
+      expect(reused.body.code).toBe('IDEMPOTENCY_KEY_REUSED');
+      await postSplitBill(app, other.token, bill({ participants: [{ email: a.email }] }), key).expect(201);
+    });
+
+    it('повтор віддає збережений рахунок, навіть якщо ledger лежить чи термін уже минув', async () => {
+      const owner = createUser(ledger);
+      const a = createUser(ledger);
+      const key = randomUUID();
+      const body = bill({
+        participants: [{ email: a.email }],
+        dueAt: new Date(Date.now() + 400).toISOString(),
+      });
+      const first = await postSplitBill(app, owner.token, body, key).expect(201);
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      ledger.down = true;
+      // Той самий запит тепер не пройшов би перевірку «dueAt у майбутньому».
+      const repeat = await postSplitBill(app, owner.token, body, key).expect(200);
+      expect(repeat.body.id).toBe(first.body.id);
+    });
+
+    it('без ключа запити незалежні: два рахунки', async () => {
+      const owner = createUser(ledger);
+      const a = createUser(ledger);
+      const body = bill({ participants: [{ email: a.email }] });
+      await postSplitBill(app, owner.token, body).expect(201);
+      await postSplitBill(app, owner.token, body).expect(201);
+      expect((await rows(owner.userId))[0].bills).toBe(2);
+    });
+
+    it('некоректний ключ → 400', async () => {
+      const owner = createUser(ledger);
+      const a = createUser(ledger);
+      await postSplitBill(app, owner.token, bill({ participants: [{ email: a.email }] }), 'x'.repeat(129)).expect(
+        400,
+      );
+    });
+  });
+
   it('ledger недоступний → 503, рахунок не створено', async () => {
     const owner = createUser(ledger);
     const a = createUser(ledger);

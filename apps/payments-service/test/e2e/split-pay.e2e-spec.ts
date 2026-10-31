@@ -188,6 +188,28 @@ describe('Split-рахунки: оплата частки (e2e)', () => {
     expect(member.wallet.available).toBe(0n);
   });
 
+  it('повтор оплати з тим самим ключем працює, поки ledger недоступний', async () => {
+    const owner = createUser(ledger);
+    const member = createUser(ledger, 'USD', 10000n);
+    const { billId, shares } = await acceptedBill(owner, [member]);
+    const key = randomUUID();
+    const body = { fromWalletId: member.wallet.walletId };
+    const first = await payShare(app, member.token, billId, shares[0].id, body, key).expect(202);
+    await waitForStatus(app, member.token, first.body.id);
+
+    ledger.down = true;
+    // Збережений переказ віддається без звернення до ledger…
+    const repeat = await payShare(app, member.token, billId, shares[0].id, body, key).expect(200);
+    expect(repeat.body.id).toBe(first.body.id);
+    // …і той самий ключ з іншим тілом так само відхиляється.
+    await payShare(app, member.token, billId, shares[0].id, { fromWalletId: randomUUID() }, key).expect(
+      422,
+    );
+    // Новий запит без ledger нічого не створює.
+    await payShare(app, member.token, billId, shares[0].id, body).expect(503);
+    expect(await transfersOf(shares[0].id)).toHaveLength(1);
+  });
+
   it('ключ звичайного переказу не оплачує частку (і навпаки) → 422', async () => {
     const owner = createUser(ledger);
     const member = createUser(ledger, 'USD', 10000n);
