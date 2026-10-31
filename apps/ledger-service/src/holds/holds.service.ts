@@ -11,11 +11,13 @@ import {
   WalletBalanceState,
 } from '../ledger/domain/postings';
 import { Hold, HoldStatus } from '../ledger/entities/hold.entity';
+import { Operation } from '../ledger/entities/operation.entity';
 import {
   commitChange,
   currentTraceparent,
   findCompletedOperation,
   formatBalance,
+  hashRequest,
   lockBalances,
 } from '../ledger/ledger-writer';
 import {
@@ -38,6 +40,7 @@ export interface PlaceHoldCommand {
 export interface ReleaseHoldCommand {
   operationId: string;
   reason?: string;
+  walletId?: string;
 }
 
 export interface CaptureHoldCommand {
@@ -52,6 +55,10 @@ export interface HoldView {
   holdId: string;
   status: HoldStatus;
 }
+
+// Слід зняття холду, якого ще не було (release раніше за запізнілий place).
+// Живе в `operations`: окремої таблиці й міграції не потрібно.
+const releasedBeforePlaced = (holdId: string) => `hold-released:${holdId}`;
 
 // Знімок гаманця для інтеграційних подій (сума й баланс — рядками "0.00").
 function walletPayload(
@@ -99,6 +106,13 @@ export class HoldsService {
           command,
         );
         if (done) return done;
+        if (
+          await manager.findOne(Operation, {
+            where: { operationId: releasedBeforePlaced(command.holdId) },
+          })
+        ) {
+          throw ledgerConflict('HOLD_NOT_ACTIVE', 'Холд уже знято');
+        }
 
         const wallet = await this.findWallet(manager, command.walletId);
         if (wallet.ownerId !== command.ownerId) {
@@ -193,88 +207,152 @@ export class HoldsService {
   ): Promise<HoldView> {
     const request = { holdId, ...command };
     return this.dataSource
-      .transaction(async (manager) => {
-        const { hold: active, balances } = await this.lockHold(
-          manager,
-          holdId,
-          [],
-        );
-        const done = await findCompletedOperation<HoldView>(
-          manager,
-          command.operationId,
-          request,
-        );
-        if (done) return done;
-        assertActive(active);
-
-        const wallet = await this.findWallet(manager, active.walletId);
-        const amountMinor = BigInt(active.amountMinor);
-        const postings = releasePostings(
-          wallet.id,
-          wallet.currency,
-          amountMinor,
-        );
-        const after = applyPostings(balances, postings);
-        const metadata = {
-          operationId: command.operationId,
-          transferId: active.transferId,
-          traceparent: currentTraceparent(),
-        };
-        const snapshot = walletPayload(wallet, amountMinor, after[wallet.id]);
-        await manager.update(Hold, { holdId }, { status: 'RELEASED' });
-        const result: HoldView = { holdId, status: 'RELEASED' };
-        await commitChange(manager, this.eventStore, {
-          streamId: wallet.id,
-          events: [
-            {
-              type: 'HoldReleased',
-              payload: {
-                holdId,
-                transferId: active.transferId,
-                walletId: wallet.id,
-                currency: wallet.currency,
-                amountMinor: active.amountMinor,
-                postings,
-              },
-              metadata,
-              publish: {
-                payload: { transferId: active.transferId, holdId, ...snapshot },
-                userIds: [wallet.ownerId],
-              },
-            },
-            ...(command.reason
-              ? [
-                  {
-                    type: 'TransferFailed',
-                    payload: {
-                      transferId: active.transferId,
-                      walletId: wallet.id,
-                      reason: command.reason,
-                    },
-                    metadata,
-                    publish: {
-                      payload: {
-                        transferId: active.transferId,
-                        reason: command.reason,
-                        ...snapshot,
-                      },
-                      userIds: [wallet.ownerId],
-                    },
-                  },
-                ]
-              : []),
-          ],
-          balances: after,
-          operation: {
-            operationId: command.operationId,
-            type: 'release',
-            request,
-            result,
-          },
-        });
-        return result;
-      })
+      .transaction((manager) =>
+        this.releaseIn(manager, holdId, command, request),
+      )
       .catch(rethrowOperationConflict);
+  }
+
+  private async releaseIn(
+    manager: EntityManager,
+    holdId: string,
+    command: ReleaseHoldCommand,
+    request: unknown,
+  ): Promise<HoldView> {
+    if (
+      command.walletId &&
+      !(await manager.findOne(Hold, { where: { holdId } }))
+    ) {
+      return this.releaseUnplaced(manager, holdId, command, request);
+    }
+    const { hold: active, balances } = await this.lockHold(
+      manager,
+      holdId,
+      [],
+    );
+    const done = await findCompletedOperation<HoldView>(
+      manager,
+      command.operationId,
+      request,
+    );
+    if (done) return done;
+    assertActive(active);
+
+    const wallet = await this.findWallet(manager, active.walletId);
+    const amountMinor = BigInt(active.amountMinor);
+    const postings = releasePostings(
+      wallet.id,
+      wallet.currency,
+      amountMinor,
+    );
+    const after = applyPostings(balances, postings);
+    const metadata = {
+      operationId: command.operationId,
+      transferId: active.transferId,
+      traceparent: currentTraceparent(),
+    };
+    const snapshot = walletPayload(wallet, amountMinor, after[wallet.id]);
+    await manager.update(Hold, { holdId }, { status: 'RELEASED' });
+    const result: HoldView = { holdId, status: 'RELEASED' };
+    await commitChange(manager, this.eventStore, {
+      streamId: wallet.id,
+      events: [
+        {
+          type: 'HoldReleased',
+          payload: {
+            holdId,
+            transferId: active.transferId,
+            walletId: wallet.id,
+            currency: wallet.currency,
+            amountMinor: active.amountMinor,
+            postings,
+          },
+          metadata,
+          publish: {
+            payload: { transferId: active.transferId, holdId, ...snapshot },
+            userIds: [wallet.ownerId],
+          },
+        },
+        ...(command.reason
+          ? [
+              {
+                type: 'TransferFailed',
+                payload: {
+                  transferId: active.transferId,
+                  walletId: wallet.id,
+                  reason: command.reason,
+                },
+                metadata,
+                publish: {
+                  payload: {
+                    transferId: active.transferId,
+                    reason: command.reason,
+                    ...snapshot,
+                  },
+                  userIds: [wallet.ownerId],
+                },
+              },
+            ]
+          : []),
+      ],
+      balances: after,
+      operation: {
+        operationId: command.operationId,
+        type: 'release',
+        request,
+        result,
+      },
+    });
+    return result;
+  }
+
+  // Холду ще немає: запит place міг застрягти й вийти за таймаут саги, але
+  // ще виконується. Під блокуванням гаманця (того самого, що бере place)
+  // перечитуємо холд: з'явився — знімаємо як звичайно, ні — лишаємо слід,
+  // і запізнілий place отримає HOLD_NOT_ACTIVE.
+  private async releaseUnplaced(
+    manager: EntityManager,
+    holdId: string,
+    command: ReleaseHoldCommand,
+    request: unknown,
+  ): Promise<HoldView> {
+    const walletId = command.walletId as string;
+    const balances = await lockBalances(manager, [walletId]);
+    if (!balances[walletId]) {
+      throw ledgerNotFound('Гаманець не знайдено');
+    }
+    const done = await findCompletedOperation<HoldView>(
+      manager,
+      command.operationId,
+      request,
+    );
+    if (done) return done;
+    if (await manager.findOne(Hold, { where: { holdId } })) {
+      // Place встиг закомітитись, поки чекали блокування.
+      return this.releaseIn(manager, holdId, command, request);
+    }
+    const result: HoldView = { holdId, status: 'RELEASED' };
+    await manager
+      .createQueryBuilder()
+      .insert()
+      .into(Operation)
+      .values([
+        {
+          operationId: releasedBeforePlaced(holdId),
+          type: 'release_unplaced',
+          requestHash: hashRequest({ holdId }),
+          result,
+        },
+        {
+          operationId: command.operationId,
+          type: 'release',
+          requestHash: hashRequest(request),
+          result,
+        },
+      ])
+      .orIgnore()
+      .execute();
+    return result;
   }
 
   // Захоплення холду атомарно: списання з held відправника й зарахування
