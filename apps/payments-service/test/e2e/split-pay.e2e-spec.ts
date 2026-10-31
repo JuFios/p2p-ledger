@@ -10,6 +10,7 @@ import {
   getSplitBill,
   payShare,
   postSplitBill,
+  postTransfer,
   waitForStatus,
 } from './helpers';
 
@@ -185,6 +186,45 @@ describe('Split-рахунки: оплата частки (e2e)', () => {
     );
     expect(await transfersOf(shares[0].id)).toHaveLength(1);
     expect(member.wallet.available).toBe(0n);
+  });
+
+  it('ключ звичайного переказу не оплачує частку (і навпаки) → 422', async () => {
+    const owner = createUser(ledger);
+    const member = createUser(ledger, 'USD', 10000n);
+    const { billId, shares } = await acceptedBill(owner, [member]);
+    const key = randomUUID();
+    // Звичайний переказ з тими самими гаманцем, отримувачем і сумою, що й у частки.
+    await postTransfer(
+      app,
+      member.token,
+      {
+        fromWalletId: member.wallet.walletId,
+        toWalletIdentifier: owner.email,
+        amount: 100,
+        currency: 'USD',
+      },
+      key,
+    ).expect(202);
+    await payShare(app, member.token, billId, shares[0].id, {
+      fromWalletId: member.wallet.walletId,
+    }, key).expect(422);
+    expect((await view(member, billId)).shares[0].status).toBe('ACCEPTED');
+
+    const payKey = randomUUID();
+    await payShare(app, member.token, billId, shares[0].id, {
+      fromWalletId: member.wallet.walletId,
+    }, payKey).expect(202);
+    await postTransfer(
+      app,
+      member.token,
+      {
+        fromWalletId: member.wallet.walletId,
+        toWalletIdentifier: owner.email,
+        amount: 100,
+        currency: 'USD',
+      },
+      payKey,
+    ).expect(422);
   });
 
   it('20 паралельних оплат з одним ключем → один переказ', async () => {
