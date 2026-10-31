@@ -316,12 +316,13 @@ export class TransferSaga {
         transfer.id,
         `transfer:${transfer.id}:release`,
         transfer.failureReason ?? 'COMPENSATION',
+        transfer.fromWalletId,
       );
       return { type: 'compensated' };
     } catch (error) {
       if (!(error instanceof LedgerRejection)) throw error;
       if (error.code === 'NOT_FOUND') {
-        // Холд так і не поставили — повертати нічого.
+        // Гаманця немає, отже й холду — повертати нічого.
         return { type: 'compensated' };
       }
       if (error.code === 'HOLD_NOT_ACTIVE') {

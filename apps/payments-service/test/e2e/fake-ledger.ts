@@ -38,6 +38,7 @@ export class FakeLedger {
   readonly holds = new Map<string, FakeHold>();
   readonly calls: string[] = [];
   private readonly operations = new Map<string, unknown>();
+  private readonly releasedBeforePlaced = new Set<string>();
   // true — відповідає 503 на все (ledger «лежить»).
   down = false;
   private server?: Server;
@@ -127,7 +128,7 @@ export class FakeLedger {
     }
     if (method === 'POST' && (match = /^\/internal\/holds\/(.+)\/release$/.exec(path))) {
       const holdId = match[1];
-      return this.once(body.operationId, () => this.release(holdId));
+      return this.once(body.operationId, () => this.release(holdId, body.walletId));
     }
     if (method === 'POST' && (match = /^\/internal\/holds\/(.+)\/capture$/.exec(path))) {
       const holdId = match[1];
@@ -158,6 +159,7 @@ export class FakeLedger {
   }
 
   private place(body: Record<string, string>) {
+    if (this.releasedBeforePlaced.has(body.holdId)) throw conflict('HOLD_NOT_ACTIVE');
     const wallet = this.wallets.get(body.walletId);
     if (!wallet) throw notFound();
     if (wallet.ownerId !== body.ownerId) throw conflict('OWNER_MISMATCH');
@@ -176,8 +178,13 @@ export class FakeLedger {
     return { holdId: body.holdId, status: 'ACTIVE' };
   }
 
-  private release(holdId: string) {
+  private release(holdId: string, walletId?: string) {
     const hold = this.holds.get(holdId);
+    if (!hold && walletId && this.wallets.has(walletId)) {
+      // Як ledger: холду ще немає — лишаємо слід, запізнілий place відхиляється.
+      this.releasedBeforePlaced.add(holdId);
+      return { holdId, status: 'RELEASED' };
+    }
     if (!hold) throw notFound();
     if (hold.status !== 'ACTIVE') throw conflict('HOLD_NOT_ACTIVE');
     const wallet = this.wallets.get(hold.walletId)!;

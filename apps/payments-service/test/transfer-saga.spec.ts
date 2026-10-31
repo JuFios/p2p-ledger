@@ -361,6 +361,13 @@ describe('TransferSaga', () => {
       });
       expect(ledger.placeHold).toHaveBeenCalledTimes(3);
       expect(ledger.releaseHold).toHaveBeenCalledTimes(1);
+      // Гаманець потрібен ledger, щоб зняти холд, який ще не з'явився.
+      expect(ledger.releaseHold).toHaveBeenCalledWith(
+        result.id,
+        `transfer:${result.id}:release`,
+        'RETRIES_EXHAUSTED',
+        result.fromWalletId,
+      );
     });
 
     it('RESOLVE_RECIPIENT: спроби вичерпано → FAILED без release', async () => {

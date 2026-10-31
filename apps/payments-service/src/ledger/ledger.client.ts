@@ -121,11 +121,18 @@ export class LedgerClient implements OnModuleDestroy {
     });
   }
 
-  releaseHold(holdId: string, operationId: string, reason?: string) {
+  // walletId — гаманець відправника: за ним ledger знімає й холд, якого ще
+  // не бачив (запит на холд застряг), щоб запізнілий холд не лишився в held.
+  releaseHold(
+    holdId: string,
+    operationId: string,
+    reason?: string,
+    walletId?: string,
+  ) {
     return this.call<LedgerHold>({
       method: 'POST',
       url: `/internal/holds/${holdId}/release`,
-      data: { operationId, reason },
+      data: { operationId, reason, walletId },
     });
   }
 
