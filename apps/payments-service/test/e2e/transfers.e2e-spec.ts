@@ -23,6 +23,7 @@ describe('Сага переказу (e2e)', () => {
 
   afterEach(() => {
     ledger.down = false;
+    ledger.downPath = null;
   });
 
   const statusEvents = async (transferId: string) => {
@@ -271,8 +272,9 @@ describe('Сага переказу (e2e)', () => {
       currency: 'USD',
     }).expect(202);
     await waitForStatus(app, sender.token, failed.body.id);
-    // Переказ, що ще виконується (ledger недоступний).
-    ledger.down = true;
+    // Переказ, що ще виконується: отримувача вже визначено (RESOLVE_RECIPIENT),
+    // а холд недоступний — сага чекає на HOLD.
+    ledger.downPath = /^\/internal\/holds$/;
     const pending = await postTransfer(app, sender.token, {
       fromWalletId: sender.wallet.walletId,
       toWalletIdentifier: recipient.email,
@@ -280,7 +282,12 @@ describe('Сага переказу (e2e)', () => {
       currency: 'USD',
     }).expect(202);
     await waitForStatus(app, sender.token, pending.body.id, ['AWAITING_RETRY']);
-    ledger.down = false;
+    const [row] = await app
+      .get(DataSource)
+      .query('SELECT recipient_user_id, step FROM transfers WHERE id = $1', [
+        pending.body.id,
+      ]);
+    expect(row).toEqual({ recipient_user_id: recipient.userId, step: 'HOLD' });
 
     const get = (id: string) =>
       request(app.getHttpServer())
@@ -291,8 +298,11 @@ describe('Сага переказу (e2e)', () => {
       .get('/transfers')
       .set('Authorization', `Bearer ${recipient.token}`)
       .expect(200);
+    await get(pending.body.id).expect(404);
     const ids = list.body.map((t: { id: string }) => t.id);
     expect(ids).not.toContain(failed.body.id);
+    expect(ids).not.toContain(pending.body.id);
+    ledger.downPath = null;
 
     // Відправник бачить усе; після зарахування переказ з'являється й в отримувача.
     await waitForStatus(app, sender.token, pending.body.id);

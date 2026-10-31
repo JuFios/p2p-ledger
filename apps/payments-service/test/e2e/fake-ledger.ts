@@ -41,6 +41,8 @@ export class FakeLedger {
   private readonly releasedBeforePlaced = new Set<string>();
   // true — відповідає 503 на все (ledger «лежить»).
   down = false;
+  // 503 лише на шляхи, що збігаються (недоступна частина ledger).
+  downPath: RegExp | null = null;
   private server?: Server;
 
   constructor(private readonly token: string) {}
@@ -86,7 +88,9 @@ export class FakeLedger {
     const path = decodeURIComponent(req.url ?? '');
     this.calls.push(`${req.method} ${path}`);
     try {
-      if (this.down) throw new HttpError(503, { message: 'down' });
+      if (this.down || this.downPath?.test(path)) {
+        throw new HttpError(503, { message: 'down' });
+      }
       if (req.headers['x-internal-token'] !== this.token) {
         throw new HttpError(401, { message: 'Unauthorized' });
       }
