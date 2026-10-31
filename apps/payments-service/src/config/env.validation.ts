@@ -161,5 +161,13 @@ export function validate(config: Record<string, unknown>) {
   if (Number(validated.TRANSFER_MAX_AMOUNT.toFixed(2)) !== validated.TRANSFER_MAX_AMOUNT) {
     throw new Error('TRANSFER_MAX_AMOUNT: не більше 2 знаків після коми');
   }
+  // Пов'язані таймаути: курс із кешу не має застарівати до CONFIRM, а lease
+  // кроку — спливати посеред виклику ledger.
+  if (validated.FX_CACHE_TTL_MS >= validated.FX_MAX_QUOTE_AGE_MS) {
+    throw new Error('FX_CACHE_TTL_MS має бути меншим за FX_MAX_QUOTE_AGE_MS');
+  }
+  if (validated.CB_TIMEOUT_MS >= validated.SAGA_STEP_TIMEOUT_MS) {
+    throw new Error('CB_TIMEOUT_MS має бути меншим за SAGA_STEP_TIMEOUT_MS');
+  }
   return validated;
 }

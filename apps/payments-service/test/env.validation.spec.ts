@@ -42,4 +42,17 @@ describe('валідація env', () => {
       /TRANSFER_MAX_AMOUNT/,
     );
   });
+
+  it.each([
+    ['FX_CACHE_TTL_MS ≥ FX_MAX_QUOTE_AGE_MS', { FX_CACHE_TTL_MS: '60000', FX_MAX_QUOTE_AGE_MS: '60000' }],
+    ['CB_TIMEOUT_MS ≥ SAGA_STEP_TIMEOUT_MS', { CB_TIMEOUT_MS: '10000', SAGA_STEP_TIMEOUT_MS: '10000' }],
+  ])('пов\'язані таймаути: %s — помилка', (name, overrides) => {
+    expect(() => validate({ ...required, ...overrides })).toThrow(
+      new RegExp(name.split(' ')[0]),
+    );
+  });
+
+  it('значення за замовчуванням узгоджені між собою', () => {
+    expect(() => validate({ ...required })).not.toThrow();
+  });
 });
