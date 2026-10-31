@@ -209,6 +209,51 @@ describe('Сага переказу (e2e)', () => {
     expect(own.body.map((t: { id: string }) => t.id)).toContain(res.body.id);
   });
 
+  it('отримувач бачить лише завершені перекази: невдалі й незавершені — 404, у списку їх немає', async () => {
+    const sender = createUser(ledger, 'USD', 500n);
+    const recipient = createUser(ledger, 'USD');
+    // RESOLVE_RECIPIENT уже проставив отримувача, а холд відхилено: переказ FAILED.
+    const failed = await postTransfer(app, sender.token, {
+      fromWalletId: sender.wallet.walletId,
+      toWalletIdentifier: recipient.email,
+      amount: 10,
+      currency: 'USD',
+    }).expect(202);
+    await waitForStatus(app, sender.token, failed.body.id);
+    // Переказ, що ще виконується (ledger недоступний).
+    ledger.down = true;
+    const pending = await postTransfer(app, sender.token, {
+      fromWalletId: sender.wallet.walletId,
+      toWalletIdentifier: recipient.email,
+      amount: 1,
+      currency: 'USD',
+    }).expect(202);
+    await waitForStatus(app, sender.token, pending.body.id, ['AWAITING_RETRY']);
+    ledger.down = false;
+
+    const get = (id: string) =>
+      request(app.getHttpServer())
+        .get(`/transfers/${id}`)
+        .set('Authorization', `Bearer ${recipient.token}`);
+    await get(failed.body.id).expect(404);
+    const list = await request(app.getHttpServer())
+      .get('/transfers')
+      .set('Authorization', `Bearer ${recipient.token}`)
+      .expect(200);
+    const ids = list.body.map((t: { id: string }) => t.id);
+    expect(ids).not.toContain(failed.body.id);
+
+    // Відправник бачить усе; після зарахування переказ з'являється й в отримувача.
+    await waitForStatus(app, sender.token, pending.body.id);
+    const done = await get(pending.body.id).expect(200);
+    expect(done.body.status).toBe('COMPLETED');
+    const after = await request(app.getHttpServer())
+      .get('/transfers')
+      .set('Authorization', `Bearer ${recipient.token}`)
+      .expect(200);
+    expect(after.body.map((t: { id: string }) => t.id)).toEqual([pending.body.id]);
+  });
+
   it('без JWT — 401; некоректне тіло — 400', async () => {
     await request(app.getHttpServer()).post('/transfers').send({}).expect(401);
     await request(app.getHttpServer()).get(`/transfers/${randomUUID()}`).expect(401);
