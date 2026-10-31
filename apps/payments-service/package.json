@@ -8,7 +8,12 @@
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,test}/**/*.ts\" --fix",
-    "test": "jest --passWithNoTests"
+    "test": "jest",
+    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
+    "typeorm": "typeorm-ts-node-commonjs -d src/data-source.ts",
+    "migration:generate": "npm run typeorm -- migration:generate",
+    "migration:run": "npm run typeorm -- migration:run",
+    "migration:revert": "npm run typeorm -- migration:revert"
   },
   "dependencies": {
     "@nestjs/common": "^10.3.0",
@@ -16,6 +21,20 @@
     "@nestjs/platform-express": "^10.3.0",
     "@nestjs/config": "^3.2.0",
     "@nestjs/terminus": "^10.3.0",
+    "@nestjs/axios": "^3.1.3",
+    "@nestjs/passport": "^10.0.3",
+    "@nestjs/schedule": "^4.1.2",
+    "@nestjs/swagger": "^7.4.2",
+    "@nestjs/throttler": "^6.7.1",
+    "@nestjs/typeorm": "^10.0.2",
+    "@opentelemetry/api": "~1.9.0",
+    "axios": "^1.21.0",
+    "ioredis": "^5.11.1",
+    "opossum": "^9.0.0",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1",
+    "pg": "^8.11.3",
+    "typeorm": "^0.3.20",
     "class-validator": "^0.14.1",
     "class-transformer": "^0.5.1",
     "reflect-metadata": "^0.2.1",
@@ -34,7 +53,12 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
-    "@typescript-eslint/parser": "^7.0.0"
+    "@typescript-eslint/parser": "^7.0.0",
+    "@nestjs/jwt": "^10.2.0",
+    "@types/opossum": "^8.1.9",
+    "@types/passport-jwt": "^4.0.1",
+    "@types/supertest": "^6.0.3",
+    "supertest": "^6.3.4"
   },
   "jest": {
     "moduleFileExtensions": [
@@ -44,6 +68,10 @@
     ],
     "rootDir": ".",
     "testRegex": "(/test/.*|\\.(test|spec))\\.ts$",
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/test/e2e/"
+    ],
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     }

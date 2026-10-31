@@ -81,7 +81,12 @@ services:
     build: ./apps/payments-service
     env_file: ./apps/payments-service/.env.example
     depends_on:
-      - ledger-service
+      payments-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ledger-service:
+        condition: service_started
     ports:
       - '3002:3002'
     healthcheck:

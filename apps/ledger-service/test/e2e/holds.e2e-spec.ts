@@ -329,6 +329,97 @@ describe('Holds (e2e)', () => {
     expect((await balanceOf(app, a)).held).toBe('0.00');
   });
 
+  it('release з walletId чужого гаманця для наявного холду → 400, холд не знято', async () => {
+    const a = await account(app);
+    const b = await account(app);
+    const transferId = randomUUID();
+    await placeHold(app, a, '3000', {
+      holdId: transferId,
+      transferId,
+      operationId: `transfer:${transferId}:hold`,
+    });
+    const res = await release(
+      app,
+      transferId,
+      'RETRIES_EXHAUSTED',
+      `transfer:${transferId}:release`,
+      b.walletId,
+    );
+    expect(res.status).toBe(400);
+    expect((await balanceOf(app, a)).held).toBe('30.00');
+    const hold = await internal(app).get(`/internal/holds/${transferId}`).expect(200);
+    expect(hold.body.status).toBe('ACTIVE');
+  });
+
+  it('release невідомого холду з walletId лишає слід: пізній place → 409, кошти не заблоковано', async () => {
+    const a = await account(app);
+    const transferId = randomUUID();
+    // Сага здалась на HOLD і знімає холд, якого ledger ще не бачив.
+    const released = await release(
+      app,
+      transferId,
+      'RETRIES_EXHAUSTED',
+      `transfer:${transferId}:release`,
+      a.walletId,
+    );
+    expect([released.status, released.body]).toEqual([
+      200,
+      { holdId: transferId, status: 'RELEASED' },
+    ]);
+    // Повтор тієї самої команди — той самий результат.
+    const again = await release(
+      app,
+      transferId,
+      'RETRIES_EXHAUSTED',
+      `transfer:${transferId}:release`,
+      a.walletId,
+    );
+    expect(again.body).toEqual(released.body);
+
+    // Запізнілий запит на холд, що застряг, — відхиляється.
+    const { res } = await placeHold(app, a, '3000', {
+      holdId: transferId,
+      transferId,
+      operationId: `transfer:${transferId}:hold`,
+    });
+    expect([res.status, res.body.code]).toEqual([409, 'HOLD_NOT_ACTIVE']);
+    expect(await balanceOf(app, a)).toEqual({
+      balance: '100.00',
+      available: '100.00',
+      held: '0.00',
+    });
+    await internal(app).get(`/internal/holds/${transferId}`).expect(404);
+  });
+
+  it('place і release з walletId одночасно: кошти ніколи не лишаються в held', async () => {
+    const a = await account(app);
+    for (let i = 0; i < 8; i++) {
+      const transferId = randomUUID();
+      const [placed, released] = await Promise.all([
+        placeHold(app, a, '1000', {
+          holdId: transferId,
+          transferId,
+          operationId: `transfer:${transferId}:hold`,
+        }),
+        release(
+          app,
+          transferId,
+          'RETRIES_EXHAUSTED',
+          `transfer:${transferId}:release`,
+          a.walletId,
+        ),
+      ]);
+      // Або release побачив холд і зняв його, або place програв tombstone.
+      expect(released.status).toBe(200);
+      expect([201, 409]).toContain(placed.res.status);
+    }
+    expect(await balanceOf(app, a)).toEqual({
+      balance: '100.00',
+      available: '100.00',
+      held: '0.00',
+    });
+  });
+
   it('відхиляє невалідні команди й невідомі холди', async () => {
     const a = await account(app);
     const { res } = await placeHold(app, a, '10.5');

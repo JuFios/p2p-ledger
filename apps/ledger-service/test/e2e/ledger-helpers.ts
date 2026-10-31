@@ -99,10 +99,12 @@ export function release(
   holdId: string,
   reason?: string,
   operationId = `transfer:${holdId}:release`,
+  walletId?: string,
 ) {
   return internal(app).post(`/internal/holds/${holdId}/release`, {
     operationId,
     reason,
+    walletId,
   });
 }
 
