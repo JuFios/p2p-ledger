@@ -1,7 +1,9 @@
 import { HttpService } from '@nestjs/axios';
+import { BeforeApplicationShutdown, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Test } from '@nestjs/testing';
 import { AxiosError, AxiosHeaders } from 'axios';
-import { throwError } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { LedgerClient } from '../src/ledger/ledger.client';
 import {
   classifyLedgerError,
@@ -96,5 +98,46 @@ describe('LedgerClient: circuit breaker', () => {
     } finally {
       client.onModuleDestroy();
     }
+  });
+});
+
+describe('LedgerClient: зупинка застосунку', () => {
+  // Nest викликає onModuleDestroy раніше за beforeApplicationShutdown, де
+  // saga runner дочікується кроків, що виконуються: ledger має лишатись
+  // доступним, поки вони не закінчились.
+  it('breaker працює, поки runner дочікується поточних кроків', async () => {
+    const http = {
+      request: jest.fn(() => of({ data: { holdId: 'h', status: 'ACTIVE' } })),
+    };
+    let duringShutdown: unknown;
+
+    @Injectable()
+    class Runner implements BeforeApplicationShutdown {
+      constructor(private readonly ledger: LedgerClient) {}
+      async beforeApplicationShutdown() {
+        duringShutdown = await this.ledger.getHold('h').catch((error) => error);
+      }
+    }
+
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        LedgerClient,
+        Runner,
+        { provide: HttpService, useValue: http },
+        {
+          provide: ConfigService,
+          useValue: new ConfigService({
+            CB_TIMEOUT_MS: 1000,
+            CB_ERROR_THRESHOLD_PERCENT: 50,
+            CB_RESET_TIMEOUT_MS: 60000,
+          }),
+        },
+      ],
+    }).compile();
+    const app = moduleRef.createNestApplication();
+    await app.init();
+    await app.close();
+
+    expect(duringShutdown).toEqual({ holdId: 'h', status: 'ACTIVE' });
   });
 });
