@@ -79,7 +79,7 @@ describe('LedgerClient: circuit breaker', () => {
       );
       expect(transition.status).toBe('AWAITING_RETRY');
     } finally {
-      client.onModuleDestroy();
+      client.onApplicationShutdown();
     }
   });
 
@@ -96,7 +96,7 @@ describe('LedgerClient: circuit breaker', () => {
       }
       expect(http.request).toHaveBeenCalledTimes(5);
     } finally {
-      client.onModuleDestroy();
+      client.onApplicationShutdown();
     }
   });
 });

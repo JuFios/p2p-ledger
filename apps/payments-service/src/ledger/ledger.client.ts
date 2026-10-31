@@ -1,5 +1,5 @@
 import { HttpService } from '@nestjs/axios';
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationShutdown } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AxiosRequestConfig } from 'axios';
 import CircuitBreaker from 'opossum';
@@ -57,7 +57,7 @@ export interface CaptureHoldRequest {
 // LedgerUnavailable — сага переходить в AWAITING_RETRY, а не висить на таймаутах.
 // Остаточні відмови (4xx) breaker не рахує як збої ledger.
 @Injectable()
-export class LedgerClient implements OnModuleDestroy {
+export class LedgerClient implements OnApplicationShutdown {
   private readonly logger = new Logger(LedgerClient.name);
   private readonly breaker: CircuitBreaker<[AxiosRequestConfig], unknown>;
 
@@ -86,8 +86,10 @@ export class LedgerClient implements OnModuleDestroy {
     this.breaker.on('close', () => this.logger.log('Circuit breaker ledger: closed'));
   }
 
-  // Зупиняє таймери статистики breaker'а.
-  onModuleDestroy() {
+  // Зупиняє таймери статистики breaker'а. Саме onApplicationShutdown, а не
+  // onModuleDestroy: той викликається раніше за beforeApplicationShutdown,
+  // де saga runner дочікується кроків, що виконуються, — їм ще потрібен ledger.
+  onApplicationShutdown() {
     this.breaker.shutdown();
   }
 

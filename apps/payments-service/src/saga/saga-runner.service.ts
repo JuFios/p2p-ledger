@@ -69,7 +69,18 @@ export class SagaRunner implements OnModuleInit, BeforeApplicationShutdown {
 
   async runOnce(): Promise<number> {
     const claimed = await this.claim(BATCH);
-    await Promise.all(claimed.map((transfer) => this.drive(transfer)));
+    // allSettled: збій одного переказу не відпускає тік, поки інші ще
+    // виконуються, — інакше зупинка не дочекалась би їх.
+    const results = await Promise.allSettled(
+      claimed.map((transfer) => this.drive(transfer)),
+    );
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        this.logger.error(
+          `Переказ ${claimed[index].id}: ${(result.reason as Error)?.message ?? result.reason}`,
+        );
+      }
+    });
     return claimed.length;
   }
 
