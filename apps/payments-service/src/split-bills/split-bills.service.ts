@@ -4,7 +4,6 @@ import {
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
-  UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
@@ -12,7 +11,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import { AuthUser } from '../auth/jwt.strategy';
 import { blockedEmails } from '../common/blocked-emails';
 import { toMinor } from '../common/money';
-import { hashRequest } from '../common/request-hash';
+import { assertSameRequest, hashRequest } from '../common/request-hash';
 import { LedgerClient, LedgerUser } from '../ledger/ledger.client';
 import { LedgerRejection, LedgerUnavailable } from '../ledger/ledger-errors';
 import { OutboxMessage } from '../outbox/outbox-message.entity';
@@ -161,12 +160,7 @@ export class SplitBillsService {
   }
 
   private replay(existing: SplitBill, requestHash: string): CreateSplitBillResult {
-    if (existing.requestHash !== requestHash) {
-      throw new UnprocessableEntityException({
-        code: 'IDEMPOTENCY_KEY_REUSED',
-        message: 'Ключ ідемпотентності вже використано з іншими параметрами',
-      });
-    }
+    assertSameRequest(existing.requestHash, requestHash);
     return { created: false, bill: toSplitBillView(existing) };
   }
 

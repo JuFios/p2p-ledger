@@ -1,13 +1,12 @@
 import {
   Injectable,
   NotFoundException,
-  UnprocessableEntityException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { AuthUser } from '../auth/jwt.strategy';
 import { toMinor } from '../common/money';
-import { hashRequest } from '../common/request-hash';
+import { assertSameRequest, hashRequest } from '../common/request-hash';
 import { currentTraceparent } from '../common/tracing';
 import { OutboxMessage } from '../outbox/outbox-message.entity';
 import { CreateTransferDto } from './dto/create-transfer.dto';
@@ -122,12 +121,7 @@ export class TransfersService {
   }
 
   private replay(existing: Transfer, requestHash: string): CreateTransferResult {
-    if (existing.requestHash !== requestHash) {
-      throw new UnprocessableEntityException({
-        code: 'IDEMPOTENCY_KEY_REUSED',
-        message: 'Ключ ідемпотентності вже використано з іншими параметрами',
-      });
-    }
+    assertSameRequest(existing.requestHash, requestHash);
     return { created: false, transfer: toTransferView(existing) };
   }
 
