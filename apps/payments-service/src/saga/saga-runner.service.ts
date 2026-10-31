@@ -13,6 +13,7 @@ import {
   Transfer,
   TransferStatus,
 } from '../transfers/entities/transfer.entity';
+import { settleSplitShare } from '../split-bills/share-settlement';
 import { transferStatusChanged } from '../transfers/transfer-events';
 import { decide, TransferSaga } from './transfer-saga';
 
@@ -174,6 +175,9 @@ export class SagaRunner implements OnModuleInit, BeforeApplicationShutdown {
       const saved = await manager.save(row);
       if (saved.status !== before.status || saved.step !== before.step) {
         await manager.save(OutboxMessage, transferStatusChanged(saved));
+      }
+      if (saved.status !== before.status) {
+        await settleSplitShare(manager, saved);
       }
       return saved;
     });

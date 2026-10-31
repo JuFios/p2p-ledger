@@ -107,3 +107,18 @@ export function acceptShare(
     .post(`/split-bills/${billId}/shares/${shareId}/accept`)
     .set('Authorization', `Bearer ${token}`);
 }
+
+export function payShare(
+  app: INestApplication,
+  token: string,
+  billId: string,
+  shareId: string,
+  body: Record<string, unknown>,
+  idempotencyKey: string | null = randomUUID(),
+) {
+  const req = request(app.getHttpServer())
+    .post(`/split-bills/${billId}/shares/${shareId}/pay`)
+    .set('Authorization', `Bearer ${token}`);
+  if (idempotencyKey !== null) req.set('Idempotency-Key', idempotencyKey);
+  return req.send(body);
+}

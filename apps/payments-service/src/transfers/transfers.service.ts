@@ -4,7 +4,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { AuthUser } from '../auth/jwt.strategy';
 import { toMinor } from '../common/money';
 import { hashRequest } from '../common/request-hash';
@@ -15,6 +15,17 @@ import { Transfer } from './entities/transfer.entity';
 import { transferStatusChanged } from './transfer-events';
 import { toTransferView, TransferView } from './transfer-view';
 
+// Параметри нового переказу після валідації; сума вже в мінорних одиницях.
+export interface NewTransfer {
+  fromWalletId: string;
+  recipientEmail: string;
+  amountMinor: string;
+  currency: string;
+  toCurrency: string;
+  // Переказ — оплата частки split-рахунку.
+  splitShareId?: string;
+}
+
 export interface CreateTransferResult {
   created: boolean;
   transfer: TransferView;
@@ -24,70 +35,87 @@ export interface CreateTransferResult {
 export class TransfersService {
   constructor(private readonly dataSource: DataSource) {}
 
-  // Створює переказ у статусі PENDING; далі його веде saga runner.
-  // Ідемпотентність: UNIQUE(sender_user_id, idempotency_key) +
-  // INSERT … ON CONFLICT DO NOTHING. Паралельний дубль чекає на коміт
-  // першого запиту й читає вже створений переказ — другого не буде.
   async create(
     user: AuthUser,
     idempotencyKey: string,
     dto: CreateTransferDto,
   ): Promise<CreateTransferResult> {
-    const amountMinor = toMinor(dto.amount).toString();
-    const toCurrency = dto.toCurrency ?? dto.currency;
+    return this.dataSource.transaction((manager) =>
+      this.insert(manager, user, idempotencyKey, {
+        fromWalletId: dto.fromWalletId,
+        recipientEmail: dto.toWalletIdentifier,
+        amountMinor: toMinor(dto.amount).toString(),
+        currency: dto.currency,
+        toCurrency: dto.toCurrency ?? dto.currency,
+      }),
+    );
+  }
+
+  // Створює переказ у статусі PENDING; далі його веде saga runner.
+  // Ідемпотентність: UNIQUE(sender_user_id, idempotency_key) +
+  // INSERT … ON CONFLICT DO NOTHING. Паралельний дубль чекає на коміт
+  // першого запиту й читає вже створений переказ — другого не буде.
+  // Виконується в транзакції викликача: оплата частки split-рахунку
+  // додає до неї перехід частки.
+  async insert(
+    manager: EntityManager,
+    user: AuthUser,
+    idempotencyKey: string,
+    params: NewTransfer,
+  ): Promise<CreateTransferResult> {
     const requestHash = hashRequest({
-      fromWalletId: dto.fromWalletId,
-      toWalletIdentifier: dto.toWalletIdentifier,
-      amountMinor,
-      currency: dto.currency,
-      toCurrency,
+      fromWalletId: params.fromWalletId,
+      toWalletIdentifier: params.recipientEmail,
+      amountMinor: params.amountMinor,
+      currency: params.currency,
+      toCurrency: params.toCurrency,
+      ...(params.splitShareId ? { splitShareId: params.splitShareId } : {}),
     });
-    return this.dataSource.transaction(async (manager) => {
-      const inserted = await manager
-        .createQueryBuilder()
-        .insert()
-        .into(Transfer)
-        .values({
-          id: randomUUID(),
-          senderUserId: user.userId,
-          senderEmail: user.email,
-          idempotencyKey,
-          requestHash,
-          fromWalletId: dto.fromWalletId,
-          recipientEmail: dto.toWalletIdentifier,
-          amountMinor,
-          currency: dto.currency,
-          toCurrency,
-          status: 'PENDING',
-          step: 'RISK_CHECK',
-          attempts: 0,
-          nextAttemptAt: () => 'now()',
-          traceparent: currentTraceparent(),
-        })
-        .orIgnore()
-        .returning('id')
-        .execute();
-
-      if (inserted.raw.length > 0) {
-        const transfer = await manager.findOneByOrFail(Transfer, {
-          id: inserted.raw[0].id,
-        });
-        await manager.save(OutboxMessage, transferStatusChanged(transfer));
-        return { created: true, transfer: toTransferView(transfer) };
-      }
-
-      const existing = await manager.findOneByOrFail(Transfer, {
+    const inserted = await manager
+      .createQueryBuilder()
+      .insert()
+      .into(Transfer)
+      .values({
+        id: randomUUID(),
         senderUserId: user.userId,
+        senderEmail: user.email,
         idempotencyKey,
+        requestHash,
+        fromWalletId: params.fromWalletId,
+        recipientEmail: params.recipientEmail,
+        amountMinor: params.amountMinor,
+        currency: params.currency,
+        toCurrency: params.toCurrency,
+        splitShareId: params.splitShareId ?? null,
+        status: 'PENDING',
+        step: 'RISK_CHECK',
+        attempts: 0,
+        nextAttemptAt: () => 'now()',
+        traceparent: currentTraceparent(),
+      })
+      .orIgnore()
+      .returning('id')
+      .execute();
+
+    if (inserted.raw.length > 0) {
+      const transfer = await manager.findOneByOrFail(Transfer, {
+        id: inserted.raw[0].id,
       });
-      if (existing.requestHash !== requestHash) {
-        throw new UnprocessableEntityException({
-          code: 'IDEMPOTENCY_KEY_REUSED',
-          message: 'Ключ ідемпотентності вже використано з іншими параметрами',
-        });
-      }
-      return { created: false, transfer: toTransferView(existing) };
+      await manager.save(OutboxMessage, transferStatusChanged(transfer));
+      return { created: true, transfer: toTransferView(transfer) };
+    }
+
+    const existing = await manager.findOneByOrFail(Transfer, {
+      senderUserId: user.userId,
+      idempotencyKey,
     });
+    if (existing.requestHash !== requestHash) {
+      throw new UnprocessableEntityException({
+        code: 'IDEMPOTENCY_KEY_REUSED',
+        message: 'Ключ ідемпотентності вже використано з іншими параметрами',
+      });
+    }
+    return { created: false, transfer: toTransferView(existing) };
   }
 
   // Переказ бачать лише відправник і отримувач; іншим — 404, як і неіснуючий.

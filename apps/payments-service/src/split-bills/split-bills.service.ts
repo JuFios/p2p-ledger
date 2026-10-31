@@ -12,7 +12,12 @@ import { toMinor } from '../common/money';
 import { LedgerClient, LedgerUser } from '../ledger/ledger.client';
 import { LedgerRejection, LedgerUnavailable } from '../ledger/ledger-errors';
 import { OutboxMessage } from '../outbox/outbox-message.entity';
+import {
+  CreateTransferResult,
+  TransfersService,
+} from '../transfers/transfers.service';
 import { CreateSplitBillDto } from './dto/create-split-bill.dto';
+import { PayShareDto } from './dto/pay-share.dto';
 import { SplitBill } from './entities/split-bill.entity';
 import { SplitShare } from './entities/split-share.entity';
 import { splitBillCreated } from './split-events';
@@ -27,6 +32,7 @@ export class SplitBillsService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly ledger: LedgerClient,
+    private readonly transfers: TransfersService,
   ) {}
 
   // Учасники — користувачі ledger за email. Ініціатор учасником бути не може:
@@ -145,6 +151,56 @@ export class SplitBillsService {
     return this.getForUser(userId, billId);
   }
 
+  // Сплата частки: переказ на email ініціатора тією самою сагою, у валюті
+  // рахунку. Переказ і перехід ACCEPTED → PAYING — одна транзакція. Переказ
+  // вставляється першим: паралельний дубль з тим самим ключем отримає той
+  // самий переказ (ON CONFLICT), а другий запит з іншим ключем програє
+  // умовному UPDATE частки → 409, і його переказ відкочується.
+  async pay(
+    user: AuthUser,
+    idempotencyKey: string,
+    billId: string,
+    shareId: string,
+    dto: PayShareDto,
+  ): Promise<CreateTransferResult> {
+    const share = await this.findOwnShare(
+      this.dataSource.manager,
+      user.userId,
+      billId,
+      shareId,
+    );
+    await this.checkWallet(user.userId, dto.fromWalletId, share.bill.currency);
+
+    return this.dataSource.transaction(async (manager) => {
+      const result = await this.transfers.insert(manager, user, idempotencyKey, {
+        fromWalletId: dto.fromWalletId,
+        recipientEmail: share.bill.creatorEmail,
+        amountMinor: share.amountMinor,
+        currency: share.bill.currency,
+        toCurrency: share.bill.currency,
+        splitShareId: share.id,
+      });
+      if (!result.created) return result;
+
+      const claimed = await manager.update(
+        SplitShare,
+        { id: share.id, status: 'ACCEPTED' },
+        { status: 'PAYING' },
+      );
+      if (claimed.affected !== 1) {
+        const current = await manager.findOneByOrFail(SplitShare, { id: share.id });
+        throw new ConflictException({
+          code: 'INVALID_SHARE_STATUS',
+          message:
+            current.status === 'PENDING'
+              ? 'Спочатку підтвердіть частку (accept)'
+              : `Частку не можна сплатити: статус ${current.status}`,
+        });
+      }
+      return result;
+    });
+  }
+
   // Частка учасника в рахунку; чужа частка чи чужий рахунок → 404.
   async findOwnShare(
     manager: EntityManager,
@@ -197,6 +253,32 @@ export class SplitBillsService {
       );
     }
     return amounts;
+  }
+
+  // Гаманець має належати платнику й бути у валюті рахунку. Чужий гаманець
+  // виглядає як неіснуючий.
+  private async checkWallet(userId: string, walletId: string, currency: string) {
+    let wallet;
+    try {
+      wallet = await this.ledger.getWallet(walletId);
+    } catch (error) {
+      if (error instanceof LedgerRejection && error.code === 'NOT_FOUND') {
+        throw new NotFoundException('Гаманець не знайдено');
+      }
+      if (error instanceof LedgerUnavailable) {
+        throw new ServiceUnavailableException('Ledger тимчасово недоступний');
+      }
+      throw error;
+    }
+    if (wallet.ownerId !== userId) {
+      throw new NotFoundException('Гаманець не знайдено');
+    }
+    if (wallet.currency !== currency) {
+      throw badRequest(
+        'CURRENCY_MISMATCH',
+        `Частку сплачують з гаманця у валюті рахунку (${currency})`,
+      );
+    }
   }
 
   private async resolveUser(email: string): Promise<LedgerUser> {
