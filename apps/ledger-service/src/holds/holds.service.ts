@@ -219,11 +219,16 @@ export class HoldsService {
     command: ReleaseHoldCommand,
     request: unknown,
   ): Promise<HoldView> {
-    if (
-      command.walletId &&
-      !(await manager.findOne(Hold, { where: { holdId } }))
-    ) {
-      return this.releaseUnplaced(manager, holdId, command, request);
+    if (command.walletId) {
+      const existing = await manager.findOne(Hold, { where: { holdId } });
+      if (!existing) {
+        return this.releaseUnplaced(manager, holdId, command, request);
+      }
+      // Гаманець холду не змінюється, тож перевірка до блокування коректна;
+      // без неї слід зняття блокував би не той гаманець, що place.
+      if (existing.walletId !== command.walletId) {
+        throw new BadRequestException('walletId не збігається з гаманцем холду');
+      }
     }
     const { hold: active, balances } = await this.lockHold(
       manager,
