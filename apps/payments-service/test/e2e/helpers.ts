@@ -79,3 +79,31 @@ export async function waitForStatus(
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }
+
+export function postSplitBill(
+  app: INestApplication,
+  token: string,
+  body: Record<string, unknown>,
+) {
+  return request(app.getHttpServer())
+    .post('/split-bills')
+    .set('Authorization', `Bearer ${token}`)
+    .send(body);
+}
+
+export function getSplitBill(app: INestApplication, token: string, id: string) {
+  return request(app.getHttpServer())
+    .get(`/split-bills/${id}`)
+    .set('Authorization', `Bearer ${token}`);
+}
+
+export function acceptShare(
+  app: INestApplication,
+  token: string,
+  billId: string,
+  shareId: string,
+) {
+  return request(app.getHttpServer())
+    .post(`/split-bills/${billId}/shares/${shareId}/accept`)
+    .set('Authorization', `Bearer ${token}`);
+}

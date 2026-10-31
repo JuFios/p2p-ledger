@@ -6,6 +6,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { TransfersModule } from './transfers/transfers.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
+import { SplitBillsModule } from './split-bills/split-bills.module';
 import { SagaModule } from './saga/saga.module';
 import { OutboxModule } from './outbox/outbox.module';
 import { validate } from './config/env.validation';
@@ -43,6 +44,7 @@ import { entities, migrations } from './data-source';
     }),
     AuthModule,
     TransfersModule,
+    SplitBillsModule,
     HealthModule,
     SagaModule,
     OutboxModule,
