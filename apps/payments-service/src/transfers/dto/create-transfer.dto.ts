@@ -1,19 +1,24 @@
-import { IsNumber, IsPositive, IsString, IsUUID } from 'class-validator';
+import { IsEmail, IsIn, IsOptional, IsUUID } from 'class-validator';
+import { SUPPORTED_CURRENCIES } from '../../common/currencies';
+import { IsMoneyAmount } from '../../common/is-money-amount';
 
-// Каркас DTO вже готовий. За потреби додайте поле під idempotency key
-// (див. ТЗ, розділ про переказ і Idempotency-Key) — воно тут навмисно
-// не заведене.
+// Ключ ідемпотентності передається заголовком Idempotency-Key, а не полем тіла.
 export class CreateTransferDto {
   @IsUUID()
   fromWalletId: string;
 
-  @IsString()
-  toWalletIdentifier: string; // email або username отримувача
+  // Лише email: username в auth-модулі немає.
+  @IsEmail()
+  toWalletIdentifier: string; // email отримувача
 
-  @IsNumber()
-  @IsPositive()
+  @IsMoneyAmount()
   amount: number;
 
-  @IsString()
+  @IsIn(SUPPORTED_CURRENCIES)
   currency: string;
+
+  // Валюта зарахування; за замовчуванням = currency.
+  @IsOptional()
+  @IsIn(SUPPORTED_CURRENCIES)
+  toCurrency?: string;
 }
