@@ -13,8 +13,8 @@
 
 ## Що ще НЕ реалізовано
 
-- `apps/payments-service` — лише каркас контролера/DTO, бізнес-логіки саги
-  переказу немає (`NotImplementedException`).
+- `apps/payments-service` — split-рахунки (сага переказу вже працює, див.
+  «Сага переказу»).
 - `apps/notifications-service` — порожній Nest-проєкт, лише `/health`.
 - Форма переказу, split-рахунки, admin-екран на фронтенді.
 
@@ -51,10 +51,44 @@ reconciliation, freeze). Заморожений гаманець не прийм
 кожному сервісі, підніміть Postgres окремо, `npm install && npm run start:dev`
 у потрібному сервісі.
 
+## Сага переказу (payments-service)
+
+`POST /transfers` (JWT + обов'язковий заголовок `Idempotency-Key`, 1–128 символів) лише створює переказ у статусі `PENDING` і відповідає `202`; далі його веде фоновий saga runner. Статус — `GET /transfers/:id` (бачать лише відправник і отримувач, іншим — 404), список — `GET /transfers?limit=`. Swagger — http://localhost:3002/docs.
+
+- **Оркестрація.** Координатор — payments-service, стан саги — рядок `transfers` (`status` + `step`). Кроки: `RISK_CHECK` (ліміт `TRANSFER_MAX_AMOUNT`, чорний список `BLOCKED_EMAILS`, не собі) → `RESOLVE_RECIPIENT` (користувач за email і його гаманець у валюті зарахування, створюється за потреби) → `FX_QUOTE` (курс з кешу, сума зарахування округлюється вниз) → `HOLD` → `CONFIRM` (курс не старший `FX_MAX_QUOTE_AGE_MS`, отримувач не заморожений) → `CAPTURE` (списання з холду й зарахування отримувачу — одна транзакція в ledger).
+- **Компенсація.** Відмова до холду → `FAILED`, відкочувати нічого. Відмова на `CONFIRM`/`CAPTURE` → `COMPENSATING` → `RELEASE_HOLD` (кошти повертаються в available, ledger пише `TransferFailed`) → `FAILED`. Компенсація повторюється, доки ledger її не прийме.
+- **Невизначений результат** (5xx, таймаут, відкритий circuit breaker) — не відмова: `AWAITING_RETRY` з exponential backoff, той самий крок з тим самим `operationId` (`transfer:<id>:<крок>`), тож у ledger він виконується один раз. Після `SAGA_MAX_ATTEMPTS` кроки до холду → `FAILED`, `HOLD`/`CONFIRM` → компенсація. `CAPTURE` ніколи не компенсується наосліп: після вичерпання спроб runner питає стан холду (`CAPTURED` → `COMPLETED`, `ACTIVE` → компенсація), а поки ledger недоступний — чекає далі.
+- **Застряглі саги.** Runner бере переказ під lease (`locked_until` = `SAGA_STEP_TIMEOUT_MS`) короткою транзакцією з `FOR UPDATE SKIP LOCKED`; HTTP-виклик іде поза транзакцією, результат фіксується окремою транзакцією разом з outbox. Процес упав посеред кроку — lease протухає, і переказ підхоплює інший runner; запізнілий результат старого runner'а відкидається.
+- **Circuit breaker** (`opossum`) на всіх викликах ledger: поки ledger лежить, виклики одразу завершуються помилкою, і сага переходить в `AWAITING_RETRY`, а не висить. Остаточні відмови ledger (4xx з кодом) breaker не рахує як збої.
+- **Ідемпотентність.** `UNIQUE(sender_user_id, idempotency_key)` + `INSERT … ON CONFLICT DO NOTHING`: паралельні дублі чекають на коміт першого запиту й отримують той самий переказ (`200`); той самий ключ з іншим тілом → `422 IDEMPOTENCY_KEY_REUSED`.
+- **Події.** Кожна зміна `status`/`step` пише в outbox `TransferStatusChanged` у тій самій транзакції; relay публікує їх у `stream:payments-events`.
+- **Rate limit** на `POST /transfers` — за `userId` з JWT (`TRANSFER_RATE_LIMIT` за `TRANSFER_RATE_TTL_MS`).
+- Одержувач — лише email: username в auth-модулі немає, а auth не розширюємо.
+- `TRANSFER_MAX_AMOUNT` — спрощене мок-правило: одне число в одиницях валюти переказу для всіх валют.
+- Env payments-service валідується на старті (`ConfigModule.forRoot({ validate })`): без обов'язкових змінних сервіс не стартує.
+
+Приклад (стек запущено `docker compose up --build`; `ACCESS`, `WALLET` — токен і USD-гаманець відправника з ledger, у гаманці є кошти; отримувач `bob@example.com` зареєстрований):
+
+```bash
+curl -s -X POST http://localhost:3002/transfers \
+  -H "Authorization: Bearer $ACCESS" -H "Idempotency-Key: $(uuidgen)" \
+  -H 'Content-Type: application/json' \
+  -d "{\"fromWalletId\":\"$WALLET\",\"toWalletIdentifier\":\"bob@example.com\",\"amount\":10,\"currency\":\"USD\",\"toCurrency\":\"EUR\"}"
+```
+
 ## Тести
 
 ```bash
 cd apps/ledger-service && npm test
+cd apps/payments-service && npm test
+```
+
+Інтеграційні тести payments (`apps/payments-service/test/e2e`) ходять у реальний Postgres на окремій БД `payments_e2e`; ledger у них підміняє HTTP-двійник internal API (`fake-ledger.ts`) — у кожного сервісу своя БД, тож справжній ledger тут не піднімається:
+
+```bash
+docker compose up -d payments-db redis
+docker compose exec payments-db createdb -U payments payments_e2e
+cd apps/payments-service && npm run test:e2e
 ```
 
 Не всі тести в репозиторії однаково надійні — це навмисно, дивись ТЗ.
@@ -83,8 +117,8 @@ cd apps/ledger-service && npm test
 | Тест овердрафту проходить «випадково» | тест | у тесті проміс не `await`-ається й немає `expect.assertions` → зелений навіть без перевірки в сервісі | мутація на коміті `f49cdbf`: прибрати `if (current < amount)` у `withdraw` — старий тест лишається зеленим, новий — червоний («Received promise resolved instead of rejected») | `await expect(...).rejects.toBeInstanceOf(BadRequestException)`, `expect.assertions`, перевірка, що запису не було (після переходу на транзакцію аналог мутації — прибрати `if (!sufficient)`) |
 | `POST /wallets`: дублікати гаманця | конкурентний доступ | `findOne` → `save` без UNIQUE → паралельні виклики створюють кілька гаманців однієї валюти, далі `findOne` повертає довільний | `wallets-concurrency.e2e-spec.ts`: 10 паралельних запитів → 10 гаманців | `UNIQUE(ownerId, currency)` + `INSERT … ON CONFLICT DO NOTHING` |
 | Сторінка гаманців завжди 401 | фронтенд | `lib/api.ts` не передає `Authorization`, кука `accessToken` ніде не читається → `/wallets` завжди «Ledger API 401» | запущений стек: `GET /wallets` після логіну | `ledgerFetch` читає токен з `cookies()`. Токен живе `JWT_ACCESS_TTL` (15 хв); після спливу сторінка знову покаже 401, бо оновлення токена (refresh) на фронтенді ще не реалізоване |
-| CI червоний | CI | `cache: npm` без lockfile, `jest` у payments без тестів → exit 1 | перший запуск CI | lockfiles у всіх сервісах, `jest --passWithNoTests` (тимчасово; так само в notifications) |
-| `payments-service` без авторизації | авторизація | `TransfersController` без JWT-guard, `GET /transfers/:id` без перевірки власника | огляд коду | **ще не виправлено** — буде закрито разом з реалізацією `payments-service` (сага переказу) |
+| CI червоний | CI | `cache: npm` без lockfile, `jest` у payments без тестів → exit 1 | перший запуск CI | lockfiles у всіх сервісах; `jest --passWithNoTests` у payments прибрано, щойно з'явились тести (у notifications — тимчасово лишається) |
+| `payments-service` без авторизації | авторизація | `TransfersController` без JWT-guard, `GET /transfers/:id` без перевірки власника | огляд коду | JWT-guard на всьому контролері; переказ бачать лише відправник і отримувач (іншим — 404); списати з чужого гаманця не можна — ledger звіряє власника при холді (`OWNER_MISMATCH`). Тести: `transfers.e2e-spec.ts` |
 | Ledger змішаний з auth через ORM-зв'язок | архітектура | зв'язок `User` ↔ `Wallet` змішує auth-контекст з ledger | огляд коду | зв'язок прибрано: гаманець знає лише `ownerId` (без FK на `users`), баланс — проєкція подій з event store |
 | Ledger не стартує проти Postgres | старт сервісу | `User.refreshTokenHash: string \| null` без явного типу колонки → `DataTypeNotSupportedError` (unit-тести мокають репозиторій і цього не бачать) | `docker compose up --build` | `@Column({ type: 'varchar', nullable: true })` |
 | Образ ledger не запускається | збірка | у `tsconfig.json` немає `include`, а в ledger є `test/` → вихід у `dist/src/main.js`, а образ запускає `node dist/main` | `docker compose up --build` | `tsconfig.build.json` без `test` |
@@ -112,3 +146,12 @@ cd apps/ledger-service && npm run test:e2e
 - `health` — крім БД показує стан Redis (стрім подій для інших сервісів). Недоступний Redis — деградація (`redis: down` у відповіді), а не відмова: запис у ledger від нього не залежить, події чекають в outbox, і relay не публікує, доки Redis не повернеться. `docker-compose.yml`: ledger-service на старті чекає на здоровий `redis`.
 - `main.ts` — Swagger на `/docs` і `enableShutdownHooks()` (фоновий outbox relay зупиняється коректно); `nest-cli.json` — плагін `@nestjs/swagger` (опис DTO без ручних декораторів).
 - Публічний контракт гаманців розширено: відповіді гаманця містять ті самі поля, що й у стартері (`balance` рядком), плюс `available`, `held`, `frozen`. **Зміна семантики:** `balance` = `available` + `held` — утримані під переказ кошти ще належать власнику, але витратити їх не можна, тож `withdraw` понад `available` дає 400, навіть якщо сума не перевищує `balance`. `deposit`/`withdraw` приймають опційний заголовок `Idempotency-Key` (повтор → той самий результат, той самий ключ з іншим тілом → 422 `IDEMPOTENCY_KEY_REUSED`); операції із замороженим гаманцем → 409 `WALLET_FROZEN`.
+
+### Змінений стартовий код payments-service
+
+- `transfers.controller.ts`, `transfers.service.ts` — каркас замінено реалізацією саги (див. «Сага переказу»); `GET /transfers/:id` отримав `ParseUUIDPipe` і перевірку доступу, додано `GET /transfers`.
+- `create-transfer.dto.ts` — `toWalletIdentifier` тепер `@IsEmail()` (лише email); `amount` — `@IsMoneyAmount` (додатне, ≤ 1 000 000, ≤ 2 знаки, як у ledger); `currency` — одна з `USD`/`EUR`/`UAH`; додано опційне `toCurrency`. Ключ ідемпотентності — заголовком `Idempotency-Key`, а не полем тіла.
+- `app.module.ts` — валідація env, TypeORM з міграціями, планувальник фонових задач, throttler; `main.ts` — Swagger на `/docs`, `enableShutdownHooks()` (saga runner і outbox relay завершуються коректно), порт через `ConfigService`; `nest-cli.json` — плагін `@nestjs/swagger`.
+- `health` — перевіряє БД і стан Redis (як у ledger: недоступний Redis — деградація, а не відмова).
+- `package.json` — `npm test` без `--passWithNoTests`, додано `test:e2e` і скрипти міграцій; `npm test` не запускає `test/e2e`.
+- `.env.example` — нові змінні саги, БД і Redis. `docker-compose.yml`: payments-service чекає на здорові `payments-db` і `redis` (на ledger — як і раніше, лише старт контейнера: недоступний ledger сага пережидає ретраями). CI: для payments піднімаються Postgres і Redis, запускаються e2e.
