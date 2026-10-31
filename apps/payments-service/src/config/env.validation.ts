@@ -117,6 +117,11 @@ export class EnvironmentVariables {
   @Min(1)
   CB_RESET_TIMEOUT_MS: number = 10000;
 
+  // Мінімальний інтервал між нагадуваннями про одну прострочену частку.
+  @IsInt()
+  @Min(1000)
+  SPLIT_REMINDER_INTERVAL_MS: number = 3600000;
+
   @IsInt()
   @Min(1)
   TRANSFER_RATE_LIMIT: number = 10;
