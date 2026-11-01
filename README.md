@@ -26,6 +26,7 @@ docker-compose up --build
 - ledger-service: http://localhost:3001
 - payments-service: http://localhost:3002
 - notifications-service: http://localhost:3003
+- bff: http://localhost:3004 (Swagger: http://localhost:3004/docs)
 - frontend: http://localhost:3000
 
 Схема БД ledger створюється міграціями (`apps/ledger-service/src/migrations`),
@@ -170,7 +171,7 @@ Nest, PostgreSQL, ioredis і Socket.IO інструментуються авто
 notifications/Socket.IO. Відмовлений переказ також має лишатися одним trace.
 Перевірена назва кореневої HTTP-операції — `POST /transfers`; запит до Jaeger:
 `/api/traces?service=payments-service&operation=POST%20%2Ftransfers&limit=10`.
-BFF додасть захищений доступ до трасувань окремо.
+BFF надає захищений доступ до трасувань через `GET /admin/traces`.
 
 Публічний `GET /metrics` на портах 3001, 3002, 3003 повертає Prometheus text
 format: стандартні метрики процесу й Node.js. Payments додатково віддає:
@@ -183,6 +184,55 @@ format: стандартні метрики процесу й Node.js. Payments 
 
 Метрики скидаються при перезапуску процесу; вони не замінюють фінансовий аудит
 у БД. Тривалість окремого кроку для admin-екрана береться зі span-ів Jaeger.
+
+## BFF (`apps/bff`)
+
+NestJS REST BFF на порту 3004 проксує лише явні публічні маршрути:
+`/auth/register|login|refresh`, `/wallets` і операції гаманця — до ledger;
+`/transfers` та `/split-bills` із accept/pay — до payments; `/activity` — до
+notifications; admin event-лог, reconciliation і freeze — до ledger.
+Внутрішні маршрути сервісів через BFF недоступні. JWT перевіряється в BFF
+і повторно в сервісі-власнику; `/admin/*` вимагає роль admin. Auth, health,
+metrics і Swagger доступні без access JWT. Мутації мають власні DTO,
+class-validator і whitelist; перевірка власності та бізнес-правила лишаються
+у сервісі-власнику. Rate limiting також виконується там за email/userId.
+`Authorization` та `Idempotency-Key` передаються без зміни значення.
+Статус і JSON-тіло upstream збережено, зокрема 202/200 для нового/повторного
+переказу, 422 для іншого тіла з тим самим ключем і 429 із `Retry-After`.
+Виклики не повторюються автоматично, таймаут — 2500 мс; мережева помилка
+дає 503. Переадресації upstream не виконуються.
+
+`GET /dashboard` паралельно читає гаманці, 10 останніх переказів і 10 записів
+активності. Кожна секція (`wallets`, `transfers`, `activity`) має або
+`{ data: [...] }`, або `{ error: { statusCode, message } }`. Недоступність
+одного джерела не прибирає решту: агрегат повертає 200 з частковими даними.
+
+`GET /admin/traces?limit=10` (1–100) читає Jaeger Query API з перевіреною
+операцією `POST /transfers` і `service=payments-service`. Відповідь — масив
+`{ traceId, spans: [{ spanId, operationName, startTime, durationMs, transferId }] }`.
+Включено лише `saga.step *` payments, у часовому порядку; повторні спроби
+збережено окремо. `startTime` — мікросекунди Unix з Jaeger, `durationMs` —
+тривалість span у мілісекундах (не різниця між часом сусідніх кроків).
+Без трас — порожній масив; недоступний Jaeger — 503. JWT користувача до
+Jaeger не передається.
+
+Конфігурація — `ConfigService` і валідація env на старті. Tracing SDK
+завантажує `.env` до інструментації HTTP і pino; OTLP експортується в Jaeger.
+Логи — JSON із `trace_id`/`span_id` та маскуванням секретних заголовків.
+`/metrics` віддає стандартні метрики Node/процесу в окремому Registry.
+`/health` через Terminus показує готовність самого BFF: власної БД і Redis
+в нього немає, відмова джерел відображається в dashboard. На SIGTERM SDK
+експортує останні span-и. Compose додає BFF з очікуванням healthy upstream,
+CI — окремий job із lint, типізацією, unit, HTTP e2e й build.
+Наявні сторінки frontend і його конфігурація ще використовують попередні
+прямі виклики сервісів.
+
+Перевірки BFF: `cd apps/bff && npm ci && npm run lint && npx tsc --noEmit &&
+npm test && npm run test:e2e && npm run build`. HTTP e2e запускають справжній
+Nest-застосунок і локальні HTTP-двійники upstream без Postgres/Redis;
+перевіряють маршрути, заголовки, DTO, JWT/admin, часткову відмову та таймаут,
+Jaeger-перетворення, health/metrics/Swagger. Unit перевіряє env; окремий
+процес перевіряє OTLP за конфігурацією лише з `.env`. Попередні тести не змінено.
 
 ## Тести
 
