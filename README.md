@@ -136,6 +136,53 @@ replay через WebSocket. Socket.IO використовує локальні
 Redis Streams обмежені утримуваною історією продюсерів (`MAXLEN ~`), тож тривала
 зупинка консюмера понад цю історію потребуватиме окремого відновлення.
 
+## Спостережуваність
+
+Кожен Nest-сервіс завантажує `src/tracing.ts` першим імпортом, до HTTP, ORM,
+Redis і Pino. OpenTelemetry NodeSDK експортує span-и через OTLP HTTP у Jaeger.
+У compose використано `jaegertracing/jaeger:2.8.0` в all-in-one режимі;
+[Jaeger UI](http://localhost:16686) доступний після `docker compose up --build`.
+Сховище трасувань у пам'яті: перезапуск Jaeger їх видаляє.
+
+`OTEL_SERVICE_NAME` визначає сервіс, `OTEL_EXPORTER_OTLP_ENDPOINT` — базову
+адресу колектора (`http://jaeger:4318` у compose, `http://localhost:4318` при
+локальному запуску). SDK додає `/v1/traces`. `LOG_LEVEL` керує рівнем JSON-логів
+nestjs-pino. У кожному рядку є `trace_id`/`span_id`; поза активним span-ом вони
+`null` (наприклад, під час запуску). Заголовки авторизації, cookie та внутрішній
+токен маскуються. Pino instrumentation корелює логи, а окремого OTLP-експорту
+логів немає. SDK завершує експорт після зупинки фонових воркерів.
+
+Контекст запиту зберігається у `transfers.traceparent` і outbox. Кожна спроба
+кроку саги — `saga.step <STEP>` з атрибутом `transfer.id`; ретраї лишаються в
+тому самому trace. Relay відновлює контекст рядка, створює `publish <type>`
+(PRODUCER) і записує його контекст у поля Redis Stream та конверт події.
+Notifications відкриває дочірній `process <type>` (CONSUMER), усередині якого
+виконує транзакцію, Socket.IO emit і ACK. Повторна доставка має окремий span
+у тому самому trace, а дедуплікація залишається за `eventId`. HTTP, Express,
+Nest, PostgreSQL, ioredis і Socket.IO інструментуються автоматично; фонові
+опитування БД/Redis без активного батька не створюють зайвих трасувань.
+
+Для перевірки створіть переказ за прикладом вище, у Jaeger оберіть
+`payments-service` і знайдіть trace з `transfer.id` або HTTP `POST /transfers`.
+У ньому мають бути `saga.step *`, HTTP-виклики `ledger-service`,
+`publish TransferStatusChanged` / `process TransferStatusChanged` та span-и
+notifications/Socket.IO. Відмовлений переказ також має лишатися одним trace.
+Перевірена назва кореневої HTTP-операції — `POST /transfers`; запит до Jaeger:
+`/api/traces?service=payments-service&operation=POST%20%2Ftransfers&limit=10`.
+BFF додасть захищений доступ до трасувань окремо.
+
+Публічний `GET /metrics` на портах 3001, 3002, 3003 повертає Prometheus text
+format: стандартні метрики процесу й Node.js. Payments додатково віддає:
+
+- `transfers_total{status="COMPLETED"|"FAILED"}` — кількість успішно
+  зафіксованих фінальних переходів у цьому процесі; втрата lease чи rollback
+  не збільшують лічильник;
+- `saga_step_duration_seconds{step}` — гістограму тривалості кожної спроби
+  кроку разом із фіксацією результату, включно з ретраями й помилками.
+
+Метрики скидаються при перезапуску процесу; вони не замінюють фінансовий аудит
+у БД. Тривалість окремого кроку для admin-екрана береться зі span-ів Jaeger.
+
 ## Тести
 
 ```bash
@@ -246,3 +293,15 @@ cd apps/ledger-service && npm run test:e2e
 - `.env.example` — БД, Redis, спільний JWT-секрет, CORS і параметри консюмера.
   Compose доповнено очікуванням здорових `notifications-db` і `redis`;
   CI запускає unit та інтеграційні тести з реальними залежностями.
+
+### Зміни стартового коду для спостережуваності
+
+- У `main.ts` трьох Nest-сервісів першим імпортується tracing, увімкнено
+  буферизацію стартових логів і підключено nestjs-pino замість `console.log`.
+  Це потрібно для раннього patch-інструментування й структурованих логів.
+- `app.module.ts` підключає новий модуль логів, метрик і завершення SDK;
+  `package.json`/lockfiles та `.env.example` доповнено сумісними залежностями
+  й налаштуваннями. Auth і його конфігурацію не переписано.
+- `docker-compose.yml` доповнено Jaeger з OTLP HTTP і UI.
+- Інтеграційний тест lease у payments отримав залежність метрик у конструкторі
+  runner; перевірки конкурентного виконання залишились тими самими.
