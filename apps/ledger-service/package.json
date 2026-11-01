@@ -19,6 +19,7 @@
     "reconcile": "ts-node src/reconcile.ts"
   },
   "dependencies": {
+    "dotenv": "^16.6.1",
     "@opentelemetry/auto-instrumentations-node": "~0.81.0",
     "@opentelemetry/exporter-trace-otlp-http": "~0.223.0",
     "@opentelemetry/sdk-node": "~0.223.0",
