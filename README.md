@@ -10,10 +10,11 @@
   CRUD гаманців. Балансу гаманця бракує event sourcing — це частина завдання.
 - `apps/frontend` — сторінки логіну, реєстрації та список гаманців (Next.js
   App Router, Server Component + API-роут-проксі для авторизації).
+- `apps/notifications-service` — Redis Streams-консюмер, персональна стрічка
+  активності та Socket.IO-сповіщення; власна БД з міграціями.
 
 ## Що ще НЕ реалізовано
 
-- `apps/notifications-service` — порожній Nest-проєкт, лише `/health`.
 - Форма переказу, split-рахунки, admin-екран на фронтенді.
 
 ## Запуск
@@ -94,11 +95,53 @@ curl -s -X POST http://localhost:3002/transfers \
 - **Прострочені частки.** `dueAt` (необов'язковий, у майбутньому) — термін оплати рахунку, дата або дата-час ISO 8601 (`2026-12-31`, `2026-12-31T18:00:00Z`); неіснуюча дата (`2026-02-31`) чи тижневий/порядковий формат (`2026-W45`) → `400`. Воркер `split-overdue` (`@nestjs/schedule`, `FOR UPDATE SKIP LOCKED`) для часток у `PENDING`/`ACCEPTED` після терміну пише в outbox `SplitShareOverdue` (адресат — власник частки), але не частіше ніж раз на `SPLIT_REMINDER_INTERVAL_MS` на частку (`last_reminded_at`). Частка в `PAYING` не нагадується. Рахунок без `dueAt` ніколи не прострочується.
 - **Події.** `SplitBillCreated` (учасникам, у тій самій транзакції, що й рахунок) і `SplitShareOverdue` йдуть через outbox у `stream:payments-events`; оплата частки видна як `TransferStatusChanged`.
 
+## Сповіщення (notifications-service)
+
+Сервіс читає `stream:ledger-events` і `stream:payments-events` у consumer group
+`notifications`. `processed_events.event_id` запобігає повторній обробці:
+маркер і рядки `activity` комітяться однією транзакцією, потім відправляються
+push-події та `XACK`. Якщо процес упав до ACK, `XAUTOCLAIM` підбирає повідомлення
+після `CONSUMER_CLAIM_IDLE_MS`. Ім'я консюмера за замовчуванням — hostname і pid;
+явний `CONSUMER_NAME` має бути унікальним для кожного процесу.
+
+Невідомі типи підтверджуються з попередженням у логах. Відомий тип із версією
+вище підтримуваної одразу потрапляє у `stream:dead-letter`; помилки обробки —
+після `CONSUMER_MAX_DELIVERIES` невдалих доставок. Запис у DLQ і ACK атомарні.
+DLQ містить `sourceStream`, `sourceId`, `reason`, `fields` (JSON початкових полів);
+перегляд: `docker compose exec redis redis-cli XRANGE stream:dead-letter - +`.
+
+`GET :3003/activity?type=DEPOSIT&limit=50` потребує Bearer access JWT і повертає
+лише активність власника токена, від нової до старої. Ліміт — 1–100, типи:
+`DEPOSIT`, `WITHDRAWAL`, `TRANSFER_SENT`, `TRANSFER_RECEIVED`, `TRANSFER_FAILED`,
+`SPLIT_BILL`, `SPLIT_REMINDER`. Swagger — `http://localhost:3003/docs`.
+
+Socket.IO: namespace `/ws`, `auth: { token: accessToken }`, кімната
+`user:<userId>` визначається сервером після перевірки JWT у middleware.
+`CORS_ORIGIN` задає дозволений origin для HTTP і Socket.IO (локально
+`http://localhost:3000`). Події сервера:
+
+- `wallet.balance` — `{ walletId, currency, balance, available, held }` із подій
+  ledger; `balance` — сума available і held, без арифметики з float.
+- `transfer.status` — `{ transferId, status, step, failureReason? }`; проміжні
+  стани бачить лише відправник, завершений переказ — також отримувач.
+- `activity.created` — збережений рядок стрічки. Deposit/withdraw походять із
+  ledger, фінальні перекази й split-події — з payments, тому переказ не дублюється
+  через одночасні події обох сервісів. Учасник split бачить лише свою частку.
+
+Доставка через брокер — at-least-once, запис activity — ідемпотентний. Push після
+коміту може бути пропущений при падінні процесу: клієнт **на кожен `connect`**
+має перечитати гаманці, поточний переказ і стрічку через REST. Сервер не робить
+replay через WebSocket. Socket.IO використовує локальні кімнати одного процесу;
+горизонтальне масштабування WS потребуватиме спільного адаптера кімнат.
+Redis Streams обмежені утримуваною історією продюсерів (`MAXLEN ~`), тож тривала
+зупинка консюмера понад цю історію потребуватиме окремого відновлення.
+
 ## Тести
 
 ```bash
 cd apps/ledger-service && npm test
 cd apps/payments-service && npm test
+cd apps/notifications-service && npm test
 ```
 
 Інтеграційні тести payments (`apps/payments-service/test/e2e`) ходять у реальний Postgres на окремій БД `payments_e2e`; ledger у них підміняє HTTP-двійник internal API (`fake-ledger.ts`) — у кожного сервісу своя БД, тож справжній ledger тут не піднімається:
@@ -107,6 +150,20 @@ cd apps/payments-service && npm test
 docker compose up -d payments-db redis
 docker compose exec payments-db createdb -U payments payments_e2e
 cd apps/payments-service && npm run test:e2e
+```
+
+Інтеграційні тести notifications використовують реальні Postgres, Redis, HTTP і
+Socket.IO. Для них потрібні окрема БД `notifications_e2e` та окремий Redis на
+6380: тести перевіряють consumer group і pending-повідомлення та не повинні
+конкурувати з локальним застосунком. У CI кожен job має власні Postgres/Redis.
+
+```bash
+docker compose up -d notifications-db
+docker compose exec notifications-db createdb -U notifications notifications_e2e
+docker run --rm -d --name p2p-notifications-test-redis -p 127.0.0.1:6380:6379 redis:7-alpine
+cd apps/notifications-service && npm run test:e2e
+# Після тестів:
+docker stop p2p-notifications-test-redis
 ```
 
 Не всі тести в репозиторії однаково надійні — це навмисно, дивись ТЗ.
@@ -135,7 +192,7 @@ cd apps/payments-service && npm run test:e2e
 | Тест овердрафту проходить «випадково» | тест | у тесті проміс не `await`-ається й немає `expect.assertions` → зелений навіть без перевірки в сервісі | мутація на коміті `f49cdbf`: прибрати `if (current < amount)` у `withdraw` — старий тест лишається зеленим, новий — червоний («Received promise resolved instead of rejected») | `await expect(...).rejects.toBeInstanceOf(BadRequestException)`, `expect.assertions`, перевірка, що запису не було (після переходу на транзакцію аналог мутації — прибрати `if (!sufficient)`) |
 | `POST /wallets`: дублікати гаманця | конкурентний доступ | `findOne` → `save` без UNIQUE → паралельні виклики створюють кілька гаманців однієї валюти, далі `findOne` повертає довільний | `wallets-concurrency.e2e-spec.ts`: 10 паралельних запитів → 10 гаманців | `UNIQUE(ownerId, currency)` + `INSERT … ON CONFLICT DO NOTHING` |
 | Сторінка гаманців завжди 401 | фронтенд | `lib/api.ts` не передає `Authorization`, кука `accessToken` ніде не читається → `/wallets` завжди «Ledger API 401» | запущений стек: `GET /wallets` після логіну | `ledgerFetch` читає токен з `cookies()`. Токен живе `JWT_ACCESS_TTL` (15 хв); після спливу сторінка знову покаже 401, бо оновлення токена (refresh) на фронтенді ще не реалізоване |
-| CI червоний | CI | `cache: npm` без lockfile, `jest` у payments без тестів → exit 1 | перший запуск CI | lockfiles у всіх сервісах; `jest --passWithNoTests` у payments прибрано, щойно з'явились тести (у notifications — тимчасово лишається) |
+| CI червоний | CI | `cache: npm` без lockfile, `jest` у payments без тестів → exit 1 | перший запуск CI | lockfiles у всіх сервісах; `jest --passWithNoTests` у payments і notifications прибрано після додавання тестів |
 | `payments-service` без авторизації | авторизація | `TransfersController` без JWT-guard, `GET /transfers/:id` без перевірки власника | огляд коду | JWT-guard на всьому контролері; переказ бачать лише відправник і отримувач (іншим — 404); списати з чужого гаманця не можна — ledger звіряє власника при холді (`OWNER_MISMATCH`). Тести: `transfers.e2e-spec.ts` |
 | Ledger змішаний з auth через ORM-зв'язок | архітектура | зв'язок `User` ↔ `Wallet` змішує auth-контекст з ledger | огляд коду | зв'язок прибрано: гаманець знає лише `ownerId` (без FK на `users`), баланс — проєкція подій з event store |
 | Ledger не стартує проти Postgres | старт сервісу | `User.refreshTokenHash: string \| null` без явного типу колонки → `DataTypeNotSupportedError` (unit-тести мокають репозиторій і цього не бачать) | `docker compose up --build` | `@Column({ type: 'varchar', nullable: true })` |
@@ -173,3 +230,19 @@ cd apps/ledger-service && npm run test:e2e
 - `health` — перевіряє БД і стан Redis (як у ledger: недоступний Redis — деградація, а не відмова).
 - `package.json` — `npm test` без `--passWithNoTests`, додано `test:e2e` і скрипти міграцій; `npm test` не запускає `test/e2e`.
 - `.env.example` — нові змінні саги, нагадувань split-рахунків, БД і Redis. `docker-compose.yml`: payments-service чекає на здорові `payments-db` і `redis` (на ledger — як і раніше, лише старт контейнера: недоступний ledger сага пережидає ретраями). CI: для payments піднімаються Postgres і Redis, запускаються e2e.
+
+### Змінений стартовий код notifications-service
+
+- `app.module.ts` — підключення власної БД через TypeORM, міграції замість
+  synchronize, валідація env через ConfigModule, JWT і нові компоненти сповіщень
+  для вимог ТЗ щодо стрічки активності та real-time.
+- `health.controller.ts` — Terminus із перевіркою БД: тепер readiness залежить
+  від з'єднання. Успішна відповідь зберігає `status: "ok"`, додає стан БД і Redis;
+  Redis down означає деградацію, REST-стрічка лишається доступною.
+- `main.ts` — Swagger `/docs`, валідація query, CORS і Socket.IO-адаптер;
+  shutdown hooks очікують завершення активної обробки до закриття БД.
+- `package.json` — сумісні з NestJS 10/Node 20 залежності, скрипти міграцій та
+  інтеграційних тестів; прибрано `--passWithNoTests`, бо тести вже є.
+- `.env.example` — БД, Redis, спільний JWT-секрет, CORS і параметри консюмера.
+  Compose доповнено очікуванням здорових `notifications-db` і `redis`;
+  CI запускає unit та інтеграційні тести з реальними залежностями.
