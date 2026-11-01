@@ -1,8 +1,14 @@
 import { cookies } from 'next/headers';
 
-const LEDGER_URL = process.env.LEDGER_SERVICE_URL ?? 'http://localhost:3001';
+import { ApiError, readResponse } from './http';
+export { ApiError } from './http';
 
-export async function ledgerFetch(path: string, init?: RequestInit) {
+const BFF_URL = process.env.BFF_URL ?? 'http://localhost:3004';
+
+export async function bffFetch<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
   // Токен лежить у httpOnly-куці (див. api/auth/login), тож додаємо його тут.
   const token = cookies().get('accessToken')?.value;
   const headers = new Headers(init?.headers);
@@ -12,14 +18,17 @@ export async function ledgerFetch(path: string, init?: RequestInit) {
   if (token && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${token}`);
   }
-  const res = await fetch(`${LEDGER_URL}${path}`, {
-    ...init,
-    headers,
-    cache: 'no-store',
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Ledger API ${res.status}: ${body}`);
+  let res: Response;
+  try {
+    res = await fetch(`${BFF_URL}${path}`, {
+      ...init,
+      headers,
+      cache: 'no-store',
+      signal: init?.signal ?? AbortSignal.timeout(8000),
+      redirect: 'manual',
+    });
+  } catch {
+    throw new ApiError(503, 'Сервіс тимчасово недоступний. Спробуйте ще раз.');
   }
-  return res.json();
+  return readResponse<T>(res);
 }

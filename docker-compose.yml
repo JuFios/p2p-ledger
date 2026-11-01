@@ -117,15 +117,33 @@ services:
       timeout: 3s
       retries: 10
 
+  bff:
+    build: ./apps/bff
+    env_file: ./apps/bff/.env.example
+    depends_on:
+      ledger-service:
+        condition: service_healthy
+      payments-service:
+        condition: service_healthy
+      notifications-service:
+        condition: service_healthy
+    ports:
+      - '3004:3004'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3004/health || exit 1']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   frontend:
     build: ./apps/frontend
     env_file: ./apps/frontend/.env.example
     environment:
-      LEDGER_SERVICE_URL: http://ledger-service:3001
-      PAYMENTS_SERVICE_URL: http://payments-service:3002
+      BFF_URL: http://bff:3004
+      WS_PUBLIC_URL: http://localhost:3003
     depends_on:
-      - ledger-service
-      - payments-service
+      bff:
+        condition: service_healthy
     ports:
       - '3000:3000'
 
