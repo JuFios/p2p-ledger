@@ -21,11 +21,14 @@ import {
 const alice = randomUUID();
 const bob = randomUUID();
 const walletId = randomUUID();
+const resources = new Set<string>([walletId]);
+let nextPosition = 0n;
 const jwt = new JwtService({ secret: process.env.JWT_ACCESS_SECRET });
 const token = (userId: string) =>
   jwt.sign({ sub: userId, email: `${userId}@test.local`, role: 'user' });
 const ledgerEvent = (ownerId = alice): IntegrationEvent => ({
   eventId: randomUUID(),
+  position: (++nextPosition).toString(),
   type: 'MoneyDeposited',
   version: 1,
   occurredAt: new Date().toISOString(),
@@ -162,7 +165,7 @@ describe('Notifications with PostgreSQL and Redis', () => {
         'DELETE FROM processed_events WHERE event_id = ANY($1::uuid[])',
         [eventIds],
       );
-      await db.query('DELETE FROM wallet_update_positions WHERE wallet_id = $1', [walletId]);
+      await db.query('DELETE FROM push_update_positions WHERE resource_id = ANY($1::uuid[])', [[...resources]]);
       await app.close();
     }
     if (redis) await redis.quit();
@@ -363,13 +366,13 @@ describe('Notifications with PostgreSQL and Redis', () => {
     const original = handler.handle.bind(handler);
     let failed = false;
     let newerId = '';
-    const spy = jest.spyOn(handler, 'handle').mockImplementation(async (event, position) => {
+    const spy = jest.spyOn(handler, 'handle').mockImplementation(async (event) => {
       if (event.eventId === older.eventId && !failed) {
         failed = true;
         newerId = await publish(newer);
         throw new Error('Transient failure');
       }
-      await original(event, position);
+      await original(event);
     });
     try {
       const olderId = await publish(older);
@@ -389,20 +392,91 @@ describe('Notifications with PostgreSQL and Redis', () => {
       const gateway = { emit: jest.fn() };
       const { NotificationsGateway } = await import('../../src/events/notifications.gateway');
       const restarted = new EventHandler(db, gateway as unknown as InstanceType<typeof NotificationsGateway>);
-      await restarted.handle(replay, '1-0');
+      replay.position = '1';
+      await restarted.handle(replay);
       expect(gateway.emit.mock.calls.map((call) => call[1])).toEqual(['activity.created']);
-      for (const sequence of ['10', '9']) {
+      for (const position of ['9007199254740993', '9007199254740992']) {
         const event = ledgerEvent();
         event.payload.walletId = isolatedWallet;
         eventIds.push(event.eventId);
-        await restarted.handle(event, `9007199254740993-${sequence}`);
+        event.position = position;
+        await restarted.handle(event);
       }
       expect(gateway.emit.mock.calls.filter((call) => call[1] === 'wallet.balance')).toHaveLength(1);
     } finally {
       spy.mockRestore();
       socket.disconnect();
-      await db.query('DELETE FROM wallet_update_positions WHERE wallet_id = $1', [isolatedWallet]);
+      await db.query('DELETE FROM push_update_positions WHERE resource_id = $1', [isolatedWallet]);
     }
+  });
+
+  it('does not push a reclaimed intermediate status after a completed transfer', async () => {
+    const transferId = randomUUID();
+    resources.add(transferId);
+    const older: IntegrationEvent = {
+      ...ledgerEvent(), position: '100', producer: 'payments-service', type: 'TransferStatusChanged',
+      payload: { transferId, senderUserId: alice, status: 'PROCESSING', step: 'HOLD' },
+    };
+    const newer: IntegrationEvent = {
+      ...older, position: '200', eventId: randomUUID(), userIds: [alice, bob],
+      payload: { ...older.payload, recipientUserId: bob, status: 'COMPLETED', step: 'DONE' },
+    };
+    eventIds.push(older.eventId, newer.eventId);
+    const pushes: { userId: string; event: string; payload: Record<string, unknown> }[] = [];
+    const handler = new EventHandler(db, {
+      emit: (userId: string, event: string, payload: Record<string, unknown>) =>
+        pushes.push({ userId, event, payload }),
+    } as unknown as ConstructorParameters<typeof EventHandler>[1]);
+    await handler.handle(newer);
+    await handler.handle(older);
+    expect(pushes.filter((push) => push.userId === alice && push.event === 'transfer.status')
+      .map((push) => push.payload.status)).toEqual(['COMPLETED']);
+    expect(pushes.filter((push) => push.userId === bob && push.event === 'transfer.status')
+      .map((push) => push.payload.status)).toEqual(['COMPLETED']);
+    expect(await processed(older.eventId)).toHaveLength(1);
+    expect(await db.getRepository(Activity).countBy({ eventId: newer.eventId })).toBe(2);
+  });
+
+  it('does not regress a wallet when an older outbox event is republished', async () => {
+    const isolatedWallet = randomUUID();
+    const older = ledgerEvent();
+    older.payload.walletId = isolatedWallet;
+    older.payload.balanceAfter = { available: '100.00', held: '0.00' };
+    const newer = ledgerEvent();
+    newer.payload.walletId = isolatedWallet;
+    newer.payload.balanceAfter = { available: '200.00', held: '0.00' };
+    eventIds.push(older.eventId, newer.eventId);
+    const balances: unknown[] = [];
+    const handler = new EventHandler(db, {
+      emit: (_userId: string, event: string, payload: Record<string, unknown>) => {
+        if (event === 'wallet.balance') balances.push(payload.balance);
+      },
+    } as unknown as ConstructorParameters<typeof EventHandler>[1]);
+    try {
+      // Перша доставка старої події впала; новіша вже оброблена.
+      await handler.handle(newer);
+      // Relay повторює обидва XADD після rollback із новими Redis ID.
+      await handler.handle(older);
+      await handler.handle(newer);
+      expect(balances).toEqual(['200.00']);
+      expect(await db.getRepository(Activity).countBy({ eventId: older.eventId })).toBe(1);
+      expect(await db.getRepository(Activity).countBy({ eventId: newer.eventId })).toBe(1);
+    } finally {
+      await db.query('DELETE FROM push_update_positions WHERE resource_id = $1', [isolatedWallet]);
+    }
+  });
+
+  it('stores legacy activity without emitting an unordered state snapshot', async () => {
+    const legacy = ledgerEvent();
+    delete legacy.position;
+    eventIds.push(legacy.eventId);
+    const calls: string[] = [];
+    const handler = new EventHandler(db, {
+      emit: (_userId: string, event: string) => calls.push(event),
+    } as unknown as ConstructorParameters<typeof EventHandler>[1]);
+    await handler.handle(legacy);
+    expect(calls).toEqual(['activity.created']);
+    expect(await processed(legacy.eventId)).toHaveLength(1);
   });
 
   it('serves database readiness', async () => {
@@ -419,6 +493,7 @@ describe('Notifications with PostgreSQL and Redis', () => {
 
   it('persists final transfer and split activity for their recipients', async () => {
     const transferId = randomUUID();
+    resources.add(transferId);
     const payment: IntegrationEvent = {
       ...ledgerEvent(),
       producer: 'payments-service',
@@ -489,7 +564,7 @@ describe('Notifications with PostgreSQL and Redis', () => {
     const event = ledgerEvent();
     eventIds.push(event.eventId);
     const handler = app.get(EventHandler);
-    await Promise.all(Array.from({ length: 10 }, () => handler.handle(event, `9007199254740993-10`)));
+    await Promise.all(Array.from({ length: 10 }, () => handler.handle(event)));
     expect(await processed(event.eventId)).toHaveLength(1);
     expect(
       await db.getRepository(Activity).countBy({ eventId: event.eventId }),
@@ -510,12 +585,12 @@ describe('Notifications with PostgreSQL and Redis', () => {
     });
     const spy = jest
       .spyOn(handler, 'handle')
-      .mockImplementation(async (value, position) => {
+      .mockImplementation(async (value) => {
         if (value.eventId === event.eventId) {
           entered();
           await gate;
         }
-        await original(value, position);
+        await original(value);
       });
     const id = await publish(event);
     await started;

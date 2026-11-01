@@ -3,6 +3,7 @@ import { ActivityType } from '../activity/activity.entity';
 
 export interface IntegrationEvent {
   eventId: string;
+  position?: string;
   type: string;
   version: number;
   occurredAt: string;
@@ -55,6 +56,10 @@ function money(value: unknown): bigint {
 export function parseEnvelope(raw: string): IntegrationEvent {
   const event = record(JSON.parse(raw));
   uuid(event.eventId);
+  if (event.position !== undefined &&
+      (typeof event.position !== 'string' || !/^[1-9]\d{0,18}$/.test(event.position) ||
+       BigInt(event.position) > 9223372036854775807n))
+    throw new Error('Invalid event position');
   if (
     typeof event.type !== 'string' ||
     !Number.isInteger(event.version) ||

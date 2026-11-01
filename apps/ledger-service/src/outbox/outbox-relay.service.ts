@@ -111,6 +111,7 @@ export class OutboxRelay implements OnModuleInit, BeforeApplicationShutdown {
           propagation.inject(parent, carrier);
           const envelope = {
             eventId: row.event_id,
+            position: row.id,
             type: row.type,
             version: row.version,
             occurredAt: row.created_at.toISOString(),

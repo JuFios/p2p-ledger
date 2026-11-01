@@ -154,3 +154,17 @@ describe('Environment validation', () => {
     expect(() => validate({ ...valid, ...invalid })).toThrow();
   });
 });
+
+describe('Stable event position', () => {
+  const envelope = () => event('MoneyDeposited', wallet(alice));
+  it.each(['0', '-1', '1.5', '9223372036854775808', 123, null])(
+    'rejects invalid position %p', (position) => {
+      expect(() => parseEnvelope(JSON.stringify({ ...envelope(), position }))).toThrow('Invalid event position');
+    },
+  );
+  it('accepts legacy envelopes and preserves bigint precision', () => {
+    expect(parseEnvelope(JSON.stringify(envelope())).position).toBeUndefined();
+    expect(parseEnvelope(JSON.stringify({ ...envelope(), position: '9223372036854775807' })).position)
+      .toBe('9223372036854775807');
+  });
+});

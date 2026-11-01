@@ -19,7 +19,7 @@ afterAll(() => sdk.shutdown());
 
 function setup(fail = false) {
   const row = {
-    id: '1', event_id: 'event-1', type: 'MoneyDeposited', version: 1,
+    id: '9007199254740993', event_id: 'event-1', type: 'MoneyDeposited', version: 1,
     payload: {}, user_ids: [], created_at: new Date(),
     traceparent: `00-${traceId}-${parentId}-01`,
   };
@@ -59,4 +59,15 @@ it('ends failed publish spans and leaves outbox unpublished for retry', async ()
   await expect(relay.publishPending()).rejects.toThrow('Redis unavailable');
   expect(exporter.getFinishedSpans()[0].status.code).toBe(SpanStatusCode.ERROR);
   expect(query.mock.calls.some(([sql]) => sql.includes('UPDATE outbox'))).toBe(false);
+});
+
+it('preserves the exact outbox position across publication retries', async () => {
+  const { relay, pipeline } = setup();
+  await relay.publishPending();
+  await relay.publishPending();
+  const positions = pipeline.xadd.mock.calls.map((call) => {
+    const args = call as unknown as string[];
+    return JSON.parse(args[args.indexOf('envelope') + 1]).position;
+  });
+  expect(positions).toEqual(['9007199254740993', '9007199254740993']);
 });

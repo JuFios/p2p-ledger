@@ -11,9 +11,7 @@ export class EventHandler {
     private readonly gateway: NotificationsGateway,
   ) {}
 
-  async handle(event: IntegrationEvent, position: string) {
-    if (!/^\d+-\d+$/.test(position)) throw new Error('Invalid stream position');
-    const [milliseconds, sequence] = position.split('-');
+  async handle(event: IntegrationEvent) {
     const result = await this.dataSource.transaction(async (manager) => {
       const inserted: { event_id: string }[] = await manager.query(
         'INSERT INTO processed_events (event_id) VALUES ($1) ON CONFLICT DO NOTHING RETURNING event_id',
@@ -31,25 +29,30 @@ export class EventHandler {
           }),
         ),
       );
-      // Усі balance-події походять з одного ledger-стріму. Час події
-      // не визначає порядок: порівнюємо обидві числові частини Redis ID.
+      // Позиція належить події продюсера й не змінюється після повторного XADD.
+      // Старі конверти без позиції зберігаємо у стрічці без застарілих state push.
       const pushes = [];
-      for (const push of [...mapped.pushes].sort((a, b) =>
-        String(a.payload.walletId).localeCompare(String(b.payload.walletId)))) {
-        if (push.event === 'wallet.balance') {
-          const advanced: { wallet_id: string }[] = await manager.query(
-            `INSERT INTO wallet_update_positions (wallet_id, milliseconds, sequence)
-             VALUES ($1, $2, $3)
-             ON CONFLICT (wallet_id) DO UPDATE
-             SET milliseconds = EXCLUDED.milliseconds, sequence = EXCLUDED.sequence
-             WHERE (wallet_update_positions.milliseconds, wallet_update_positions.sequence)
-                 < (EXCLUDED.milliseconds, EXCLUDED.sequence)
-             RETURNING wallet_id`,
-            [push.payload.walletId, milliseconds, sequence],
+      const advanced = new Map<string, boolean>();
+      const candidates = mapped.pushes.map((push) => ({
+        push,
+        resourceId: String(push.payload.walletId ?? push.payload.transferId),
+      })).sort((a, b) => a.resourceId.localeCompare(b.resourceId));
+      for (const { push, resourceId } of candidates) {
+        if (!event.position) continue;
+        const key = `${push.event}:${resourceId}`;
+        if (!advanced.has(key)) {
+          const rows: { resource_id: string }[] = await manager.query(
+            `INSERT INTO push_update_positions (producer, event, resource_id, position)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (producer, event, resource_id) DO UPDATE
+             SET position = EXCLUDED.position
+             WHERE push_update_positions.position < EXCLUDED.position
+             RETURNING resource_id`,
+            [event.producer, push.event, resourceId, event.position],
           );
-          if (!advanced.length) continue;
+          advanced.set(key, rows.length > 0);
         }
-        pushes.push(push);
+        if (advanced.get(key)) pushes.push(push);
       }
       return { pushes, activities };
     });
