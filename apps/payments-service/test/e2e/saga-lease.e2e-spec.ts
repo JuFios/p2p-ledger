@@ -3,6 +3,7 @@ import { SchedulerRegistry } from '@nestjs/schedule';
 import { randomUUID } from 'crypto';
 import { DataSource } from 'typeorm';
 import { entities, migrations } from '../../src/data-source';
+import { MetricsService } from '../../src/observability/metrics.service';
 import { SagaRunner } from '../../src/saga/saga-runner.service';
 import { StepResult, TransferSaga } from '../../src/saga/transfer-saga';
 
@@ -24,7 +25,13 @@ describe('Lease saga runner (інтеграційний, Postgres)', () => {
       settings: { maxAttempts: 3, retryBaseMs: 60000 },
       execute: (transfer: { id: string }) => execute(transfer.id),
     } as unknown as TransferSaga;
-    return new SagaRunner(db, saga, config, {} as SchedulerRegistry);
+    return new SagaRunner(
+      db,
+      saga,
+      config,
+      {} as SchedulerRegistry,
+      new MetricsService(),
+    );
   }
 
   async function insertTransfers(

@@ -9,12 +9,14 @@ import { AuthModule } from './auth/auth.module';
 import { SplitBillsModule } from './split-bills/split-bills.module';
 import { SagaModule } from './saga/saga.module';
 import { OutboxModule } from './outbox/outbox.module';
+import { ObservabilityModule } from './observability/observability.module';
 import { validate } from './config/env.validation';
 import { entities, migrations } from './data-source';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate }),
+    ObservabilityModule,
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({

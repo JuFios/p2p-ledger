@@ -1,10 +1,13 @@
+import './tracing';
+import { Logger } from 'nestjs-pino';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  app.useLogger(app.get(Logger));
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.enableCors();
   // Фоновий outbox relay має завершитись коректно на SIGTERM.
@@ -23,7 +26,6 @@ async function bootstrap() {
   SwaggerModule.setup('docs', app, document);
   const port = process.env.PORT ?? 3001;
   await app.listen(port);
-  // eslint-disable-next-line no-console
-  console.log(`ledger-service listening on ${port}`);
+  app.get(Logger).log(`ledger-service listening on ${port}`);
 }
 bootstrap();

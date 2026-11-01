@@ -1,5 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import {
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -16,6 +17,16 @@ import { SUPPORTED_CURRENCIES } from '../common/currencies';
 // решта має значення за замовчуванням. Типи вказано явно: за ними
 // enableImplicitConversion приводить рядки env до чисел.
 export class EnvironmentVariables {
+  @IsString()
+  @IsNotEmpty()
+  OTEL_SERVICE_NAME: string = 'payments-service';
+
+  @IsUrl({ require_tld: false })
+  OTEL_EXPORTER_OTLP_ENDPOINT: string = 'http://localhost:4318';
+
+  @IsIn(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
+  LOG_LEVEL: string = 'info';
+
   @IsInt()
   @Min(1)
   PORT: number = 3002;

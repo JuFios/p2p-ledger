@@ -9,11 +9,13 @@ import { HealthModule } from './health/health.module';
 import { InternalModule } from './internal/internal.module';
 import { AdminModule } from './admin/admin.module';
 import { OutboxModule } from './outbox/outbox.module';
+import { ObservabilityModule } from './observability/observability.module';
 import { entities, migrations } from './data-source';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ObservabilityModule,
     TypeOrmModule.forRoot({
       type: 'postgres',
       host: process.env.DATABASE_HOST,
