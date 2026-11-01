@@ -16,8 +16,14 @@ export class InitialSchema1793534400000 implements MigrationInterface {
     await queryRunner.query(
       `CREATE INDEX "IDX_activity_user_type" ON activity (user_id, type)`,
     );
+    await queryRunner.query(`CREATE TABLE push_update_positions (
+      producer varchar NOT NULL, event varchar NOT NULL, resource_id uuid NOT NULL,
+      position numeric(20,0) NOT NULL,
+      PRIMARY KEY (producer, event, resource_id)
+    )`);
   }
   async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query('DROP TABLE push_update_positions');
     await queryRunner.query('DROP TABLE activity');
     await queryRunner.query('DROP TABLE processed_events');
   }
