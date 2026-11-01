@@ -98,6 +98,11 @@ services:
   notifications-service:
     build: ./apps/notifications-service
     env_file: ./apps/notifications-service/.env.example
+    depends_on:
+      notifications-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - '3003:3003'
     healthcheck:

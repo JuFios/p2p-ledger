@@ -106,6 +106,29 @@ jobs:
 
   notifications-service:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: notifications
+          POSTGRES_PASSWORD: notifications
+          POSTGRES_DB: notifications
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U notifications -d notifications"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     defaults:
       run:
         working-directory: apps/notifications-service
@@ -119,6 +142,16 @@ jobs:
       - run: npm install
       - run: npm run lint
       - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run test:e2e
+        env:
+          DATABASE_HOST: localhost
+          DATABASE_PORT: 5432
+          DATABASE_USER: notifications
+          DATABASE_PASSWORD: notifications
+          DATABASE_NAME: notifications
+          REDIS_PORT: 6379
+          JWT_ACCESS_SECRET: ci-access-secret
 
   frontend:
     runs-on: ubuntu-latest
