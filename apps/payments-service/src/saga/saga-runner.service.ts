@@ -6,8 +6,9 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
-import { propagation, ROOT_CONTEXT, trace } from '@opentelemetry/api';
+import { propagation, ROOT_CONTEXT, SpanStatusCode, trace } from '@opentelemetry/api';
 import { DataSource, In } from 'typeorm';
+import { MetricsService } from '../observability/metrics.service';
 import { OutboxMessage } from '../outbox/outbox-message.entity';
 import {
   Transfer,
@@ -43,6 +44,7 @@ export class SagaRunner implements OnModuleInit, BeforeApplicationShutdown {
     private readonly saga: TransferSaga,
     private readonly config: ConfigService,
     private readonly scheduler: SchedulerRegistry,
+    private readonly metrics: MetricsService,
   ) {}
 
   onModuleInit() {
@@ -132,6 +134,7 @@ export class SagaRunner implements OnModuleInit, BeforeApplicationShutdown {
       { attributes: { 'transfer.id': transfer.id } },
       parent,
       async (span) => {
+        const started = performance.now();
         try {
           const result = await this.saga.execute(transfer);
           span.setAttribute('saga.result', result.type);
@@ -142,8 +145,26 @@ export class SagaRunner implements OnModuleInit, BeforeApplicationShutdown {
             this.saga.settings,
           );
           const saved = await this.commit(transfer, transition);
+          if (
+            saved && saved.status !== transfer.status &&
+            (saved.status === 'COMPLETED' || saved.status === 'FAILED')
+          ) {
+            this.metrics.transfers.inc({ status: saved.status });
+          }
+          this.logger.log(
+            { transferId: transfer.id, step: transfer.step, result: result.type },
+            'Saga step processed',
+          );
           return saved && transition.continue ? saved : null;
+        } catch (error) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
         } finally {
+          this.metrics.stepDuration.observe(
+            { step: transfer.step },
+            (performance.now() - started) / 1000,
+          );
           span.end();
         }
       },

@@ -1,4 +1,7 @@
 import {
+  context, propagation, ROOT_CONTEXT, SpanKind, SpanStatusCode, trace,
+} from '@opentelemetry/api';
+import {
   BeforeApplicationShutdown,
   Inject,
   Injectable,
@@ -91,43 +94,74 @@ export class OutboxRelay implements OnModuleInit, BeforeApplicationShutdown {
       );
       if (rows.length === 0) return 0;
       const pipeline = this.redis.pipeline();
-      for (const row of rows) {
-        const envelope = {
-          eventId: row.event_id,
-          type: row.type,
-          version: row.version,
-          occurredAt: row.created_at.toISOString(),
-          producer: 'ledger-service',
-          userIds: row.user_ids,
-          traceparent: row.traceparent ?? undefined,
-          payload: row.payload,
-        };
-        pipeline.xadd(
-          LEDGER_EVENTS_STREAM,
-          'MAXLEN',
-          '~',
-          maxLen,
-          '*',
-          'eventId',
-          row.event_id,
-          'type',
-          row.type,
-          'version',
-          row.version,
-          'traceparent',
-          row.traceparent ?? '',
-          'envelope',
-          JSON.stringify(envelope),
-        );
-      }
-      for (const [error] of (await pipeline.exec()) ?? []) {
-        if (error) throw error;
-      }
-      await manager.query(
-        `UPDATE outbox SET published_at = now() WHERE id = ANY($1::bigint[])`,
-        [rows.map((row) => row.id)],
+      const spans = rows.map((row) =>
+        trace.getTracer('ledger-service').startSpan(
+          `publish ${row.type}`,
+          {
+            kind: SpanKind.PRODUCER,
+            attributes: { 'messaging.message.id': row.event_id },
+          },
+          propagation.extract(ROOT_CONTEXT, { traceparent: row.traceparent ?? '' }),
+        ),
       );
-      return rows.length;
+      try {
+        for (const [index, row] of rows.entries()) {
+          const parent = trace.setSpan(ROOT_CONTEXT, spans[index]);
+          const carrier: Record<string, string> = {};
+          propagation.inject(parent, carrier);
+          const envelope = {
+            eventId: row.event_id,
+            type: row.type,
+            version: row.version,
+            occurredAt: row.created_at.toISOString(),
+            producer: 'ledger-service',
+            userIds: row.user_ids,
+            traceparent: carrier.traceparent,
+            payload: row.payload,
+          };
+          pipeline.xadd(
+            LEDGER_EVENTS_STREAM,
+            'MAXLEN',
+            '~',
+            maxLen,
+            '*',
+            'eventId',
+            row.event_id,
+            'type',
+            row.type,
+            'version',
+            row.version,
+            'traceparent',
+            carrier.traceparent ?? '',
+            'envelope',
+            JSON.stringify(envelope),
+          );
+        }
+        for (const [error] of (await pipeline.exec()) ?? []) {
+          if (error) throw error;
+        }
+        await manager.query(
+          `UPDATE outbox SET published_at = now() WHERE id = ANY($1::bigint[])`,
+          [rows.map((row) => row.id)],
+        );
+        for (const [index, row] of rows.entries()) {
+          context.with(trace.setSpan(ROOT_CONTEXT, spans[index]), () =>
+            this.logger.log(
+              { eventId: row.event_id, type: row.type },
+              'Event published',
+            ),
+          );
+        }
+        return rows.length;
+      } catch (error) {
+        for (const span of spans) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+        }
+        throw error;
+      } finally {
+        for (const span of spans) span.end();
+      }
     });
   }
 }

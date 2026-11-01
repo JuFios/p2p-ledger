@@ -1,3 +1,4 @@
+import { MetricsService } from '../../src/observability/metrics.service';
 import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { randomUUID } from 'crypto';
@@ -24,7 +25,7 @@ describe('Lease saga runner (інтеграційний, Postgres)', () => {
       settings: { maxAttempts: 3, retryBaseMs: 60000 },
       execute: (transfer: { id: string }) => execute(transfer.id),
     } as unknown as TransferSaga;
-    return new SagaRunner(db, saga, config, {} as SchedulerRegistry);
+    return new SagaRunner(db, saga, config, {} as SchedulerRegistry, new MetricsService());
   }
 
   async function insertTransfers(

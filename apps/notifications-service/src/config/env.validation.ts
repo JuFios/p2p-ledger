@@ -1,5 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import {
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsString,
@@ -11,6 +12,16 @@ import {
 import { hostname } from 'os';
 
 export class EnvironmentVariables {
+  @IsString()
+  @IsNotEmpty()
+  OTEL_SERVICE_NAME: string = 'notifications-service';
+
+  @IsUrl({ require_tld: false })
+  OTEL_EXPORTER_OTLP_ENDPOINT: string = 'http://localhost:4318';
+
+  @IsIn(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
+  LOG_LEVEL: string = 'info';
+
   @IsInt()
   @Min(1)
   @Max(65535)

@@ -1,4 +1,7 @@
 import {
+  propagation, ROOT_CONTEXT, SpanKind, SpanStatusCode, trace,
+} from '@opentelemetry/api';
+import {
   BeforeApplicationShutdown,
   Injectable,
   Logger,
@@ -121,35 +124,53 @@ export class StreamConsumer
   }
 
   private async process(stream: string, [id, fields]: Entry) {
-    let errorMessage: string;
-    try {
-      const values: Record<string, string> = {};
-      for (let i = 0; i < fields.length; i += 2)
-        values[fields[i]] = fields[i + 1];
-      const event = parseEnvelope(values.envelope);
-      if (!KNOWN_TYPES.includes(event.type)) {
-        this.logger.warn(`Unknown event type: ${event.type}`);
-      } else if (event.version > 1) {
-        await this.deadLetter(stream, id, fields, 'Unsupported event version');
-        return;
-      } else {
-        await this.handler.handle(event);
-      }
-      await this.redis.xack(stream, GROUP, id);
-      return;
-    } catch (error) {
-      errorMessage = (error as Error).message;
-    }
-    this.logger.warn(`Event ${stream}/${id}: ${errorMessage}`);
-    const pending = (await this.redis.xpending(stream, GROUP, id, id, 1)) as [
-      string,
-      string,
-      number,
-      number,
-    ][];
-    if (pending[0] && Number(pending[0][3]) >= this.maxDeliveries) {
-      await this.deadLetter(stream, id, fields, errorMessage);
-    }
+    const values: Record<string, string> = {};
+    for (let i = 0; i < fields.length; i += 2)
+      values[fields[i]] = fields[i + 1];
+    const parent = propagation.extract(ROOT_CONTEXT, values);
+    return trace.getTracer('notifications-service').startActiveSpan(
+      `process ${values.type ?? 'unknown'}`,
+      {
+        kind: SpanKind.CONSUMER,
+        attributes: { 'messaging.message.id': values.eventId ?? id },
+      },
+      parent,
+      async (span) => {
+        try {
+          const event = parseEnvelope(values.envelope);
+          if (!KNOWN_TYPES.includes(event.type)) {
+            this.logger.warn(`Unknown event type: ${event.type}`);
+          } else if (event.version > 1) {
+            span.setStatus({
+              code: SpanStatusCode.ERROR,
+              message: 'Unsupported event version',
+            });
+            await this.deadLetter(stream, id, fields, 'Unsupported event version');
+            return;
+          } else {
+            await this.handler.handle(event);
+          }
+          await this.redis.xack(stream, GROUP, id);
+          this.logger.log(
+            { eventId: event.eventId, type: event.type },
+            'Event processed',
+          );
+        } catch (error) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          const errorMessage = (error as Error).message;
+          this.logger.warn(`Event ${stream}/${id}: ${errorMessage}`);
+          const pending = (await this.redis.xpending(stream, GROUP, id, id, 1)) as [
+            string, string, number, number,
+          ][];
+          if (pending[0] && Number(pending[0][3]) >= this.maxDeliveries) {
+            await this.deadLetter(stream, id, fields, errorMessage);
+          }
+        } finally {
+          span.end();
+        }
+      },
+    );
   }
 
   private async deadLetter(

@@ -59,6 +59,12 @@ services:
       timeout: 3s
       retries: 10
 
+  jaeger:
+    image: jaegertracing/jaeger:2.8.0
+    ports:
+      - '16686:16686'
+      - '4318:4318'
+
   ledger-service:
     build: ./apps/ledger-service
     env_file: ./apps/ledger-service/.env.example
