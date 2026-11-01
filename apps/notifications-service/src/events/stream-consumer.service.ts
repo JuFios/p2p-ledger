@@ -148,7 +148,7 @@ export class StreamConsumer
             await this.deadLetter(stream, id, fields, 'Unsupported event version');
             return;
           } else {
-            await this.handler.handle(event);
+            await this.handler.handle(event, id);
           }
           await this.redis.xack(stream, GROUP, id);
           this.logger.log(

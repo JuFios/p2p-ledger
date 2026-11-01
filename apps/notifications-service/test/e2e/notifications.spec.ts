@@ -162,6 +162,7 @@ describe('Notifications with PostgreSQL and Redis', () => {
         'DELETE FROM processed_events WHERE event_id = ANY($1::uuid[])',
         [eventIds],
       );
+      await db.query('DELETE FROM wallet_update_positions WHERE wallet_id = $1', [walletId]);
       await app.close();
     }
     if (redis) await redis.quit();
@@ -343,6 +344,67 @@ describe('Notifications with PostgreSQL and Redis', () => {
       received.filter((row) => row.eventId === event.eventId),
     ).toHaveLength(1);
   });
+  it('reclaims older activity without regressing a newer wallet balance', async () => {
+    const older = ledgerEvent();
+    const newer = ledgerEvent();
+    const isolatedWallet = randomUUID();
+    older.payload.walletId = isolatedWallet;
+    newer.payload.walletId = isolatedWallet;
+    older.payload.balanceAfter = { available: '100.00', held: '0.00' };
+    newer.payload.balanceAfter = { available: '200.00', held: '0.00' };
+    const pushes: string[] = [];
+    const socket = await connect(alice);
+    const delivered: string[] = [];
+    socket.on('activity.created', (value) => delivered.push(value.eventId));
+    socket.on('wallet.balance', (value) => {
+      if (value.walletId === isolatedWallet) pushes.push(value.balance);
+    });
+    const handler = app.get(EventHandler);
+    const original = handler.handle.bind(handler);
+    let failed = false;
+    let newerId = '';
+    const spy = jest.spyOn(handler, 'handle').mockImplementation(async (event, position) => {
+      if (event.eventId === older.eventId && !failed) {
+        failed = true;
+        newerId = await publish(newer);
+        throw new Error('Transient failure');
+      }
+      await original(event, position);
+    });
+    try {
+      const olderId = await publish(older);
+      await until(() => processed(older.eventId), (rows) => rows.length === 1);
+      await acked(STREAMS[0], olderId);
+      await acked(STREAMS[0], newerId);
+      // Сигнал activity старої події приходить після усіх попередніх emit.
+      await until(async () => delivered, (ids) => ids.includes(older.eventId));
+      expect(pushes).toEqual(['200.00']);
+      expect(await processed(newer.eventId)).toHaveLength(1);
+      expect(await db.getRepository(Activity).countBy({ eventId: older.eventId })).toBe(1);
+
+      // Новий handler без пам'яті попереднього інстансу теж відкидає старий push.
+      const replay = ledgerEvent();
+      replay.payload.walletId = isolatedWallet;
+      eventIds.push(replay.eventId);
+      const gateway = { emit: jest.fn() };
+      const { NotificationsGateway } = await import('../../src/events/notifications.gateway');
+      const restarted = new EventHandler(db, gateway as unknown as InstanceType<typeof NotificationsGateway>);
+      await restarted.handle(replay, '1-0');
+      expect(gateway.emit.mock.calls.map((call) => call[1])).toEqual(['activity.created']);
+      for (const sequence of ['10', '9']) {
+        const event = ledgerEvent();
+        event.payload.walletId = isolatedWallet;
+        eventIds.push(event.eventId);
+        await restarted.handle(event, `9007199254740993-${sequence}`);
+      }
+      expect(gateway.emit.mock.calls.filter((call) => call[1] === 'wallet.balance')).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+      socket.disconnect();
+      await db.query('DELETE FROM wallet_update_positions WHERE wallet_id = $1', [isolatedWallet]);
+    }
+  });
+
   it('serves database readiness', async () => {
     const response = await request(app.getHttpServer())
       .get('/health')
@@ -427,7 +489,7 @@ describe('Notifications with PostgreSQL and Redis', () => {
     const event = ledgerEvent();
     eventIds.push(event.eventId);
     const handler = app.get(EventHandler);
-    await Promise.all(Array.from({ length: 10 }, () => handler.handle(event)));
+    await Promise.all(Array.from({ length: 10 }, () => handler.handle(event, `9007199254740993-10`)));
     expect(await processed(event.eventId)).toHaveLength(1);
     expect(
       await db.getRepository(Activity).countBy({ eventId: event.eventId }),
@@ -448,12 +510,12 @@ describe('Notifications with PostgreSQL and Redis', () => {
     });
     const spy = jest
       .spyOn(handler, 'handle')
-      .mockImplementation(async (value) => {
+      .mockImplementation(async (value, position) => {
         if (value.eventId === event.eventId) {
           entered();
           await gate;
         }
-        await original(value);
+        await original(value, position);
       });
     const id = await publish(event);
     await started;
