@@ -48,10 +48,16 @@ export function useTransfer() {
   const final = transfer ? isFinal(transfer) : false;
   useEffect(() => {
     if (!id || final) return;
-    void refresh();
-    const timer = setInterval(() => void refresh(), 2000);
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    async function poll() {
+      await refresh();
+      if (!stopped) timer = setTimeout(() => void poll(), 2000);
+    }
+    void poll();
     return () => {
-      clearInterval(timer);
+      stopped = true;
+      clearTimeout(timer);
     };
   }, [id, final, refresh]);
   useEffect(

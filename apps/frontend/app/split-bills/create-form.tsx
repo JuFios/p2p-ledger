@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { CURRENCIES } from '@/lib/types';
+import { isDefinitiveRejection } from '@/lib/http';
 import { createBill } from './actions';
 
 export function CreateBillForm() {
@@ -27,7 +28,7 @@ export function CreateBillForm() {
       const result = await createBill(saved.current);
       if (result.error) {
         setError(result.error);
-        if (result.status && result.status < 500 && result.status !== 408)
+        if (result.status && isDefinitiveRejection(result.status))
           saved.current = null;
       } else if (result.id) {
         router.push(`/split-bills/${result.id}`);

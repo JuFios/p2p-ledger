@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { ApiError, clientFetch } from '@/lib/http';
+import { ApiError, clientFetch, isDefinitiveRejection } from '@/lib/http';
 import { CURRENCIES, Wallet } from '@/lib/types';
 import { useLiveSocket } from '@/lib/use-live-socket';
 import { LiveStatus } from '@/components/live-status';
@@ -61,12 +61,7 @@ export function Wallets({
       attempt.current = null;
       await reload();
     } catch (err) {
-      if (
-        err instanceof ApiError &&
-        err.status >= 400 &&
-        err.status < 500 &&
-        err.status !== 408
-      )
+      if (err instanceof ApiError && isDefinitiveRejection(err.status))
         attempt.current = null;
       setError((err as Error).message);
     } finally {

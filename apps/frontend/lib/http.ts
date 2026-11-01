@@ -7,6 +7,12 @@ export class ApiError extends Error {
   }
 }
 
+export function isDefinitiveRejection(status: number) {
+  return (
+    status >= 400 && status < 500 && ![401, 403, 408, 429].includes(status)
+  );
+}
+
 export async function readResponse<T>(res: Response): Promise<T> {
   const body = await res.json().catch(() => null);
   if (!res.ok) {

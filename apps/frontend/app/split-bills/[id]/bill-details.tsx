@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ApiError, clientFetch } from '@/lib/http';
+import { ApiError, clientFetch, isDefinitiveRejection } from '@/lib/http';
 import { isFinal, SplitBill, Transfer, Wallet } from '@/lib/types';
 import { useLiveSocket } from '@/lib/use-live-socket';
 import { useTransfer } from '@/lib/use-transfer';
@@ -117,12 +117,7 @@ export function BillDetails({
       monitor.track(value);
       await reload();
     } catch (err) {
-      if (
-        err instanceof ApiError &&
-        err.status >= 400 &&
-        err.status < 500 &&
-        err.status !== 408
-      )
+      if (err instanceof ApiError && isDefinitiveRejection(err.status))
         attempt.current = null;
       setError((err as Error).message);
     } finally {
