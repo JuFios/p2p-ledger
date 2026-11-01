@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { Activity } from '../activity/activity.entity';
-import { IntegrationEvent, mapEvent } from './event-mapper';
+import { IntegrationEvent, mapEvent, Push } from './event-mapper';
 import { NotificationsGateway } from './notifications.gateway';
 
 @Injectable()
@@ -31,12 +31,15 @@ export class EventHandler {
       );
       // Позиція належить події продюсера й не змінюється після повторного XADD.
       // Старі конверти без позиції зберігаємо у стрічці без застарілих state push.
-      const pushes = [];
+      const pushes: Push[] = [];
       const advanced = new Map<string, boolean>();
-      const candidates = mapped.pushes.map((push) => ({
-        push,
-        resourceId: String(push.payload.walletId ?? push.payload.transferId),
-      })).sort((a, b) => a.resourceId.localeCompare(b.resourceId));
+      // Стабільний порядок оновлення маркерів запобігає взаємним блокуванням.
+      const candidates = mapped.pushes
+        .map((push) => ({
+          push,
+          resourceId: String(push.payload.walletId ?? push.payload.transferId),
+        }))
+        .sort((a, b) => a.resourceId.localeCompare(b.resourceId));
       for (const { push, resourceId } of candidates) {
         if (!event.position) continue;
         const key = `${push.event}:${resourceId}`;

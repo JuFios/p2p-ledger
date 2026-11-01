@@ -1,4 +1,3 @@
-import { ObservabilityModule } from './observability/observability.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -10,6 +9,7 @@ import { HealthModule } from './health/health.module';
 import { InternalModule } from './internal/internal.module';
 import { AdminModule } from './admin/admin.module';
 import { OutboxModule } from './outbox/outbox.module';
+import { ObservabilityModule } from './observability/observability.module';
 import { entities, migrations } from './data-source';
 
 @Module({

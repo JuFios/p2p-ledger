@@ -1,4 +1,3 @@
-import { ObservabilityModule } from './observability/observability.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
@@ -12,6 +11,7 @@ import { EventHandler } from './events/event-handler.service';
 import { NotificationsGateway } from './events/notifications.gateway';
 import { StreamConsumer } from './events/stream-consumer.service';
 import { HealthController } from './health.controller';
+import { ObservabilityModule } from './observability/observability.module';
 
 @Module({
   imports: [
