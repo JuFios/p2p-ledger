@@ -8,14 +8,10 @@
 
 - `apps/ledger-service` — автентифікація (register/login/refresh) і базовий
   CRUD гаманців. Балансу гаманця бракує event sourcing — це частина завдання.
-- `apps/frontend` — сторінки логіну, реєстрації та список гаманців (Next.js
-  App Router, Server Component + API-роут-проксі для авторизації).
+- `apps/frontend` — логін/реєстрація, live-гаманці, переказ із прогресом саги,
+  split-рахунки, активність із фільтром та адмінка (Next.js App Router через BFF).
 - `apps/notifications-service` — Redis Streams-консюмер, персональна стрічка
   активності та Socket.IO-сповіщення; власна БД з міграціями.
-
-## Що ще НЕ реалізовано
-
-- Форма переказу, split-рахунки, admin-екран на фронтенді.
 
 ## Запуск
 
@@ -387,3 +383,101 @@ Notifications зберігає останню позицію у `push_update_pos
 JWT перевіряється при WS-handshake. Сплив JWT сам собою не від'єднує вже
 автентифіковану WS-сесію; політика строку активної сесії потребує окремого
 рішення. Нове підключення завжди проходить перевірку токена.
+
+
+## Frontend: серверні дані та live-оновлення
+
+Сторінки `/wallets`, `/transfers/new`, `/split-bills`, `/split-bills/[id]`,
+`/activity` і `/admin` доступні після входу. Гаманці можна відкрити у USD/EUR/UAH
+і поповнити тестовими коштами. Переказ приймає email отримувача, суму у валюті
+обраного гаманця й валюту зарахування. Split-рахунок підтримує поділ порівну
+або власні суми (у кожному рядку: email, пробіл, сума), необов’язковий термін
+оплати, окреме підтвердження та оплату власної частки.
+
+- **Server/Client Components.** Початкові гаманці, рахунки й активність
+  завантажуються Server Components через `lib/api.ts` без кешу. Client Components
+  обробляють форми, Socket.IO, повторні спроби, фільтри й прогрес переказу.
+  Створення рахунку та підтвердження частки викликають Server Actions; кожна
+  action звертається до BFF з cookie поточного користувача. Сервіс-власник
+  повторно перевіряє права. Грошові мутації виконуються через fetch із явним
+  `Idempotency-Key`. Базова HTML/серверна валідація доповнює DTO BFF і сервісів.
+- **Ідемпотентність форми.** Ключ UUID створюється один раз для спроби разом
+  зі знімком тіла. Після мережевої помилки/5xx поля заблоковано, кнопка повтору
+  надсилає той самий ключ і тіло. Після остаточної 4xx-відмови форму можна
+  виправити, а новий переказ після фінального статусу починає нову спробу.
+  Це працює протягом життя відкритої форми; збереження незавершеної форми
+  між перезавантаженнями сторінки не реалізовано. Такий самий ключ використовується
+  для поповнення, оплати частки й створення split-рахунку через Server Action.
+- **Live.** `useLiveSocket` підключається до namespace `/ws`, показує
+  online/offline/reconnecting, отримує `wallet.balance`, `transfer.status`
+  і `activity.created`. Кожен `connect`, включно з reconnect, запускає REST-refetch
+  відповідного стану; новий handshake бере свіжий токен. Активний переказ
+  додатково опитується раз на 2 секунди до COMPLETED/FAILED, частки PAYING —
+  до зміни стану. Стрічка повторно читається з поточним фільтром після push.
+- **Адмінка.** Журнал гаманця, reconciliation за період та останні traces
+  завантажуються незалежними Suspense-секціями. Відмова Jaeger не приховує
+  решту секцій. Тривалість кожної спроби `saga.step *` береться з OTel через
+  BFF `/admin/traces`, у мілісекундах. Роль у UI — лише підказка;
+  BFF і ledger самі перевіряють JWT та admin. Є loading/empty/error стани.
+
+### Доступ до BFF та сесія
+
+Server Components і Server Actions викликають `BFF_URL` напряму. Клієнт ходить
+через `/api/bff/[...path]`: route handler додає Bearer з httpOnly-cookie,
+передає `Idempotency-Key`, статус, JSON помилки та `Retry-After`. Дозволені лише
+публічні групи маршрутів BFF; POST перевіряє Origin/Host. Автоматичних повторів
+мутацій немає. Мережева помилка/таймаут повертається як 503.
+
+`middleware.ts` оновлює access token через BFF `/auth/refresh`, коли він
+прострочений або до спливу лишилось менше 10 секунд. Нові cookie доступні вже
+поточному серверному рендеру. Недійсний refresh → login/401 і очищення cookie;
+тимчасова недоступність → 503 зі збереженням сесії для повтору. Паралельні
+refresh одного токена об’єднуються в межах одного процесу; кілька frontend
+інстансів потребуватимуть окремого узгодження ротації. Cookie мають HttpOnly,
+SameSite=Lax та Secure при HTTPS.
+
+`GET /api/auth/ws-token` повертає access token і runtime `WS_PUBLIC_URL` без
+кешування. Це свідомий компроміс httpOnly для Socket.IO handshake: access token
+стає доступним коду сторінки в пам’яті, refresh token залишається лише у cookie.
+Токени не зберігаються в localStorage. При розгортанні за межами localhost
+`WS_PUBLIC_URL` має вказувати на доступну браузеру адресу notifications,
+а його `CORS_ORIGIN` — на адресу фронтенду.
+
+### Зміни стартового коду frontend
+
+- `lib/api.ts` тепер викликає BFF замість ledger; auth API-проксі login/register
+  використовують його та зберігають upstream-статуси помилок. Наявні сторінки
+  login/register залишені без змін.
+- `/wallets` зберігає початкове завантаження на сервері й передає його новому
+  Client Component для live-балансів, відкриття гаманця та поповнення.
+- `layout.tsx` доповнено навігацією до реалізованих сторінок; inline styles
+  і мінімальний стиль стартера збережено.
+- `.env.example` та frontend-секція Compose використовують `BFF_URL` замість
+  прямих `LEDGER_SERVICE_URL`/`PAYMENTS_SERVICE_URL`. `NEXT_PUBLIC_WS_URL` замінено
+  на `WS_PUBLIC_URL`: адреса надходить у runtime з `/api/auth/ws-token`,
+  тому її не потрібно вбудовувати під час `next build`. Frontend чекає healthy BFF.
+- Додано `socket.io-client@^4` та HTTP-тести на вбудованому Node test runner,
+  без додаткового тестового фреймворку. Наявні тести сервісів не змінювались.
+  Frontend job CI після production build запускає `npm test`.
+
+Перевірка фронтенду (Node 20):
+
+```bash
+cd apps/frontend
+npm ci
+npm run lint
+npx tsc --noEmit
+npm run build
+npm test
+```
+
+HTTP-тести запускають production Next.js та локальний HTTP-двійник BFF на
+вільних портах. Перевіряють cookie/refresh і паралельний refresh, серверне
+завантаження балансів, WS-token, прозоре передавання ключа/тіла/статусів/422/429,
+Origin-захист, недоступність internal-маршрутів, фільтр активності та незалежні
+секції адмінки при відмові traces. Для `npm test` потрібна готова `.next`
+після `npm run build`. Локально без контейнера: `BFF_URL=http://localhost:3004 WS_PUBLIC_URL=http://localhost:3003 npm run dev`.
+
+Підходи відповідають документації [Next.js 14: Middleware](https://nextjs.org/docs/14/app/building-your-application/routing/middleware),
+[Server Actions](https://nextjs.org/docs/14/app/building-your-application/data-fetching/server-actions-and-mutations)
+і [Socket.IO 4: Client options](https://socket.io/docs/v4/client-options/).
