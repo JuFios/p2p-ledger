@@ -188,3 +188,4 @@ jobs:
       - run: npm run lint
       # next build робить типчек
       - run: npm run build
+      - run: npm test

@@ -139,11 +139,11 @@ services:
     build: ./apps/frontend
     env_file: ./apps/frontend/.env.example
     environment:
-      LEDGER_SERVICE_URL: http://ledger-service:3001
-      PAYMENTS_SERVICE_URL: http://payments-service:3002
+      BFF_URL: http://bff:3004
+      WS_PUBLIC_URL: http://localhost:3003
     depends_on:
-      - ledger-service
-      - payments-service
+      bff:
+        condition: service_healthy
     ports:
       - '3000:3000'
 
