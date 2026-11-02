@@ -49,7 +49,7 @@ export class AuthService {
   }
 
   async refresh(refreshToken: string): Promise<TokenPair> {
-    let payload: { sub: string };
+    let payload: { sub: string; sid?: string };
     try {
       payload = this.jwt.verify(refreshToken, {
         secret: process.env.JWT_REFRESH_SECRET,
@@ -70,6 +70,9 @@ export class AuthService {
     if (!matches) {
       throw new UnauthorizedException('Refresh token відкликано');
     }
+    const sessionId = payload.sid ?? actual.toString();
+    if (sessionId !== user.refreshSessionId)
+      throw new UnauthorizedException('Refresh token відкликано');
     return this.issueTokens(user, user.refreshTokenHash);
   }
 
@@ -78,33 +81,43 @@ export class AuthService {
     expectedRefreshHash?: string,
   ): Promise<TokenPair> {
     const payload = { sub: user.id, email: user.email, role: user.role };
+    const sessionId =
+      expectedRefreshHash === undefined ? randomUUID() : user.refreshSessionId!;
     const accessToken = this.jwt.sign(payload, {
       secret: process.env.JWT_ACCESS_SECRET!,
       expiresIn: process.env.JWT_ACCESS_TTL ?? '15m',
     });
-    const refreshToken = this.jwt.sign(payload, {
-      secret: process.env.JWT_REFRESH_SECRET,
-      expiresIn: process.env.JWT_REFRESH_TTL ?? '7d',
-      jwtid: randomUUID(),
-    });
+    const refreshToken = this.jwt.sign(
+      { ...payload, sid: sessionId },
+      {
+        secret: process.env.JWT_REFRESH_SECRET,
+        expiresIn: process.env.JWT_REFRESH_TTL ?? '7d',
+        jwtid: randomUUID(),
+      },
+    );
     user.refreshTokenHash = createHash('sha256')
       .update(refreshToken)
       .digest('hex');
     if (expectedRefreshHash !== undefined) {
       const result = await this.users.update(
-        { id: user.id, refreshTokenHash: expectedRefreshHash },
+        {
+          id: user.id,
+          refreshTokenHash: expectedRefreshHash,
+          refreshSessionId: sessionId,
+        },
         { refreshTokenHash: user.refreshTokenHash },
       );
       if (result.affected !== 1)
         throw new UnauthorizedException('Refresh token відкликано');
     } else {
+      user.refreshSessionId = sessionId;
       await this.users.save(user);
     }
     return { accessToken, refreshToken };
   }
 
   async logout(refreshToken: string): Promise<void> {
-    let payload: { sub: string };
+    let payload: { sub: string; sid?: string };
     try {
       payload = this.jwt.verify(refreshToken, {
         secret: process.env.JWT_REFRESH_SECRET,
@@ -112,18 +125,12 @@ export class AuthService {
     } catch {
       return;
     }
-    const user = await this.users.findOne({ where: { id: payload.sub } });
-    if (!user?.refreshTokenHash) return;
-    const actual = Buffer.from(
-      createHash('sha256').update(refreshToken).digest('hex'),
-    );
-    const expected = Buffer.from(user.refreshTokenHash);
-    if (actual.length !== expected.length || !timingSafeEqual(actual, expected))
-      return;
-    // Умова захищає нову сесію, створену паралельно з logout.
+    // Токени одного входу мають спільний sid навіть після ротації.
+    const sessionId =
+      payload.sid ?? createHash('sha256').update(refreshToken).digest('hex');
     await this.users.update(
-      { id: user.id, refreshTokenHash: user.refreshTokenHash },
-      { refreshTokenHash: null },
+      { id: payload.sub, refreshSessionId: sessionId },
+      { refreshTokenHash: null, refreshSessionId: null },
     );
   }
 }

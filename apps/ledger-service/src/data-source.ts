@@ -8,6 +8,7 @@ import { Operation } from './ledger/entities/operation.entity';
 import { Hold } from './ledger/entities/hold.entity';
 import { OutboxMessage } from './ledger/entities/outbox-message.entity';
 import { InitialSchema1793370448769 } from './migrations/1793370448769-InitialSchema';
+import { AddRefreshSession1793658000000 } from './migrations/1793658000000-AddRefreshSession';
 
 export const entities = [
   User,
@@ -20,7 +21,10 @@ export const entities = [
   OutboxMessage,
 ];
 
-export const migrations = [InitialSchema1793370448769];
+export const migrations = [
+  InitialSchema1793370448769,
+  AddRefreshSession1793658000000,
+];
 
 // Для TypeORM CLI (migration:generate / migration:run). Застосунок підключається
 // через TypeOrmModule.forRoot з тими самими entities і migrations.

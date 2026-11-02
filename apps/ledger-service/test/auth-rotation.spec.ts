@@ -32,7 +32,7 @@ describe('Refresh token rotation', () => {
         return value;
       }),
       update: jest.fn(async (where, value) => {
-        if (!user || where.refreshTokenHash !== user.refreshTokenHash)
+        if (!user || Object.entries(where).some(([key, value]) => user![key as keyof User] !== value))
           return { affected: 0 };
         user = { ...user, ...value };
         return { affected: 1 };
@@ -94,4 +94,49 @@ describe('Refresh token rotation', () => {
       'відкликано',
     );
   });
+  it('revokes the rotated session when refresh wins against an in-flight logout', async () => {
+    const first = await service.register(credentials);
+    const apply = repo.update.getMockImplementation()!;
+    let resume: () => void = () => undefined;
+    let started: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { resume = resolve; });
+    const reached = new Promise<void>((resolve) => { started = resolve; });
+    repo.update.mockImplementationOnce(async (...args) => {
+      started();
+      await gate;
+      return apply(...args);
+    });
+    const loggingOut = service.logout(first.refreshToken);
+    await reached;
+    const rotated = await service.refresh(first.refreshToken);
+    resume();
+    await loggingOut;
+    await expect(service.refresh(rotated.refreshToken)).rejects.toThrow('відкликано');
+  });
+  it('revokes all rotations from the same login using its previous token', async () => {
+    const first = await service.register(credentials);
+    const rotated = await service.refresh(first.refreshToken);
+    await service.logout(first.refreshToken);
+    await expect(service.refresh(rotated.refreshToken)).rejects.toThrow('відкликано');
+  });
+  it('does not revoke a new login when an old logout completes late', async () => {
+    const first = await service.register(credentials);
+    const apply = repo.update.getMockImplementation()!;
+    let resume: () => void = () => undefined;
+    let started: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { resume = resolve; });
+    const reached = new Promise<void>((resolve) => { started = resolve; });
+    repo.update.mockImplementationOnce(async (...args) => {
+      started();
+      await gate;
+      return apply(...args);
+    });
+    const loggingOut = service.logout(first.refreshToken);
+    await reached;
+    const current = await service.login(credentials);
+    resume();
+    await loggingOut;
+    await expect(service.refresh(current.refreshToken)).resolves.toHaveProperty('accessToken');
+  });
+
 });

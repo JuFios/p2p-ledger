@@ -8,29 +8,31 @@ describe('Session logout', () => {
   const jwt = new JwtService();
   const secret = 'logout-test-secret';
   let service: AuthService;
-  let user: { id: string; refreshTokenHash: string | null };
+  let user: { id: string; refreshTokenHash: string | null; refreshSessionId: string | null };
   let update: jest.Mock;
   const token = (id = 'user', expired = false) => jwt.sign({ sub: id }, { secret, expiresIn: expired ? -1 : 60, jwtid: Math.random().toString() });
   beforeEach(() => {
     process.env.JWT_REFRESH_SECRET = secret;
-    user = { id: 'user', refreshTokenHash: null };
+    user = { id: 'user', refreshTokenHash: null, refreshSessionId: null };
     update = jest.fn(async (where, value) => {
-      if (where.refreshTokenHash === user.refreshTokenHash) Object.assign(user, value);
+      if (where.refreshSessionId === user.refreshSessionId) Object.assign(user, value);
     });
     service = new AuthService({ findOne: async () => ({ ...user }), update } as unknown as Repository<User>, jwt);
   });
   it('revokes only the matching current token', async () => {
     const current = token();
     user.refreshTokenHash = createHash('sha256').update(current).digest('hex');
+    user.refreshSessionId = user.refreshTokenHash;
     await service.logout(current);
     expect(user.refreshTokenHash).toBeNull();
     expect(update).toHaveBeenCalledTimes(1);
   });
   it('ignores replaced, expired and invalid tokens', async () => {
     user.refreshTokenHash = createHash('sha256').update(token()).digest('hex');
+    user.refreshSessionId = user.refreshTokenHash;
     const original = user.refreshTokenHash;
     for (const old of [token(), token('user', true), 'garbage']) await service.logout(old);
     expect(user.refreshTokenHash).toBe(original);
-    expect(update).not.toHaveBeenCalled();
+    expect(user.refreshSessionId).toBe(original);
   });
 });
