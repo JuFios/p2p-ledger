@@ -1,5 +1,8 @@
 import '@fontsource-variable/inter';
 import './globals.css';
+import { cookies } from 'next/headers';
+import { sessionClaims } from '@/lib/session';
+import { AppHeader } from '@/components/app-header';
 
 export const metadata = {
   title: 'P2P Ledger',
@@ -10,17 +13,18 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const user = sessionClaims(cookies().get('accessToken')?.value);
+  const links = [
+    { href: '/wallets', label: 'Гаманці' },
+    { href: '/transfers/new', label: 'Переказ' },
+    { href: '/split-bills', label: 'Спільні рахунки' },
+    { href: '/activity', label: 'Активність' },
+    ...(user?.role === 'admin' ? [{ href: '/admin', label: 'Адміністрування' }] : []),
+  ];
   return (
     <html lang="uk">
       <body>
-        <nav aria-label="Головна навігація" style={{ padding: 16, display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-          <a href="/wallets">Гаманці</a>
-          <a href="/transfers/new">Переказ</a>
-          <a href="/split-bills">Спільні рахунки</a>
-          <a href="/activity">Активність</a>
-          <a href="/admin">Адміністрування</a>
-          <form method="post" action="/api/auth/logout"><button type="submit">Вийти</button></form>
-        </nav>
+        <AppHeader email={user?.email ?? ''} role={user?.role} links={links}/>
         {children}
       </body>
     </html>
