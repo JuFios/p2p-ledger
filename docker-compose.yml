@@ -51,6 +51,9 @@ services:
 
   redis:
     image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redis-data:/data
     ports:
       - '6379:6379'
     healthcheck:
@@ -148,6 +151,7 @@ services:
       - '3000:3000'
 
 volumes:
+  redis-data:
   ledger-db-data:
   payments-db-data:
   notifications-db-data:
