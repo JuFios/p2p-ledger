@@ -12,8 +12,8 @@
   --accent: 79 70 229;
   --on-accent: 255 255 255;
   --positive: 4 120 87;
-  --caution: 180 83 9;
-  --negative: 225 29 72;
+  --caution: 146 64 14;
+  --negative: 190 18 60;
   --info: 3 105 161;
 }
 @media (prefers-color-scheme: dark) {
