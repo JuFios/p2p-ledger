@@ -1,3 +1,7 @@
+x-admin-env: &admin-env
+  ADMIN_EMAIL: admin@example.com
+  ADMIN_PASSWORD: change-me-admin
+
 services:
   ledger-db:
     ports: !reset []
@@ -12,6 +16,7 @@ services:
   ledger-service:
     ports: !reset []
     environment:
+      <<: *admin-env
       LOGIN_RATE_LIMIT: 1000
   payments-service:
     ports: !reset []
@@ -29,10 +34,9 @@ services:
     profiles: [test]
     build: ./tests/system
     environment:
+      <<: *admin-env
       BFF_URL: http://bff:3004
       WS_PUBLIC_URL: http://notifications-service:3003
-      ADMIN_EMAIL: admin@example.com
-      ADMIN_PASSWORD: change-me-admin
     depends_on:
       bff:
         condition: service_healthy

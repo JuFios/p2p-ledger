@@ -31,27 +31,23 @@ async function main() {
   const recipient = await user();
   const from = await wallet(sender, 'USD', 100);
   const to = await wallet(recipient, 'USD');
+  const requestCount = 50;
   const start = performance.now();
-  const requests = await Promise.all(
-    Array.from({ length: 50 }, async () => {
+  const finals = await Promise.all(
+    Array.from({ length: requestCount }, async () => {
       const began = performance.now();
       const response = await send(sender, from, recipient, 10);
       assert.equal(response.status, 202);
+      const acceptedMs = performance.now() - began;
+      const result = await terminal(sender, response.body.id);
       return {
-        transfer: response.body,
-        began,
-        acceptedMs: performance.now() - began,
+        result,
+        acceptedMs,
+        terminalMs: performance.now() - began,
       };
     }),
   );
-  assert.equal(new Set(requests.map((r) => r.transfer.id)).size, 50);
-  const finals = await Promise.all(
-    requests.map(async (request) => ({
-      result: await terminal(sender, request.transfer.id),
-      acceptedMs: request.acceptedMs,
-      terminalMs: performance.now() - request.began,
-    })),
-  );
+  assert.equal(new Set(finals.map((f) => f.result.id)).size, requestCount);
   const elapsed = performance.now() - start;
   const completed = finals.filter((f) => f.result.status === 'COMPLETED');
   const failed = finals.filter((f) => f.result.status === 'FAILED');
@@ -72,7 +68,7 @@ async function main() {
   assert.equal(log.filter((e) => e.type === 'HoldReleased').length, 0);
   assertEventBalances(log, senderWallet);
   assertEventBalances(await events(adminToken, to.id), recipientWallet);
-  await reconcile(adminToken);
+  const reconciliation = await reconcile(adminToken);
   console.table([
     {
       status: 'COMPLETED',
@@ -95,15 +91,15 @@ async function main() {
   });
   console.log(
     JSON.stringify({
-      requests: 50,
-      completed: 10,
-      failed: 40,
+      requests: finals.length,
+      completed: completed.length,
+      failed: failed.length,
       senderAvailable: senderWallet.available,
       senderHeld: senderWallet.held,
       recipientBalance: recipientWallet.balance,
-      reconciliation: true,
+      reconciliation: reconciliation.ok,
       elapsedMs: Math.round(elapsed),
-      terminalPerSecond: Number((50000 / elapsed).toFixed(2)),
+      terminalPerSecond: Number(((finals.length * 1000) / elapsed).toFixed(2)),
     }),
   );
 }

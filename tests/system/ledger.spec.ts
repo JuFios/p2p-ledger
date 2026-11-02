@@ -29,6 +29,7 @@ describe('Distributed ledger through BFF', () => {
   });
 
   it('converts USD to EUR with matching balances, journal, activity and reconciliation', async () => {
+    // Незалежні очікувані суми для фікстури EUR/USD у docker-compose.test.yml.
     const sender = await user();
     const recipient = await user();
     const from = await wallet(sender, 'USD', 100);
@@ -146,6 +147,27 @@ describe('Distributed ledger through BFF', () => {
     assertBalance(current, 10000n);
     assertBalance(await readWallet(recipient, to.id), 0n);
     assertEventBalances(log, current);
+    expect(
+      (await events(adminToken, to.id)).some(
+        (e) => e.type === 'TransferCompleted',
+      ),
+    ).toBe(false);
+    const activity = await eventually(
+      async () =>
+        (await api<Activity[]>('/activity?limit=100', sender.token)).body,
+      (rows) => rows.some((a) => a.payload.transferId === result.id),
+      'failed transfer activity',
+    );
+    expect(
+      activity
+        .filter((a) => a.payload.transferId === result.id)
+        .map((a) => a.type),
+    ).toEqual(['TRANSFER_FAILED']);
+    expect(
+      (
+        await api<Activity[]>('/activity?limit=100', recipient.token)
+      ).body.filter((a) => a.payload.transferId === result.id),
+    ).toEqual([]);
     await reconcile(adminToken);
   });
 
@@ -184,7 +206,7 @@ describe('Distributed ledger through BFF', () => {
     let seed = 0x5eed;
     const random = (n: number) => {
       seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-      return seed % n;
+      return (seed >>> 16) % n;
     };
     const owners = [await user(), await user()];
     const currencies: Currency[] = ['USD', 'EUR', 'UAH'];
@@ -198,11 +220,19 @@ describe('Distributed ledger through BFF', () => {
         });
       }
     }
-    for (let i = 0; i < 36; i++) {
-      const source = accounts[random(accounts.length)];
+    const operations = accounts.flatMap((source) =>
+      Array.from({ length: 6 }, (_, i) => ({ source, type: i % 3 })),
+    );
+    for (let i = operations.length - 1; i > 0; i--) {
+      const j = random(i + 1);
+      [operations[i], operations[j]] = [operations[j], operations[i]];
+    }
+    const coverage = new Set<string>();
+    for (const { source, type } of operations) {
+      coverage.add(`${source.wallet.id}:${type}`);
       const cents = BigInt(1 + random(499));
       const amount = Number(cents) / 100;
-      switch (i % 3) {
+      switch (type) {
         case 0:
           await money(source.owner, source.wallet.id, 'deposit', amount);
           source.expected += cents;
@@ -228,6 +258,7 @@ describe('Distributed ledger through BFF', () => {
         }
       }
     }
+    expect(coverage.size).toBe(accounts.length * 3);
     const allEvents = new Map<string, LedgerEvent>();
     for (const account of accounts) {
       const current = await readWallet(account.owner, account.wallet.id);
@@ -251,7 +282,7 @@ describe('Distributed ledger through BFF', () => {
     );
   });
 
-  it('receives live balances and reloads REST state on reconnect after a missed push', async () => {
+  it('honors the WS and REST contract after a transport reconnect', async () => {
     const owner = await user();
     const w = await wallet(owner, 'USD');
     const socket = io(
