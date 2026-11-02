@@ -1,7 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { clearAttempt, readAttempt, writeAttempt } from '@/lib/attempt-storage';
+import {
+  attemptScope,
+  clearAttempt,
+  readAttempt,
+  writeAttempt,
+} from '@/lib/attempt-storage';
 import { ApiError, clientFetch, isDefinitiveRejection } from '@/lib/http';
 import { CURRENCIES, Wallet } from '@/lib/types';
 import { useLiveSocket } from '@/lib/use-live-socket';
@@ -17,12 +22,15 @@ import { CopyId } from '@/components/ui/copy-id';
 import { money } from '@/lib/format';
 
 export function Wallets({
+  userId,
   initial,
   initialError,
 }: {
+  userId: string;
   initial: Wallet[];
   initialError: string | null;
 }) {
+  const scope = attemptScope(userId, 'wallets');
   const [wallets, setWallets] = useState(initial);
   const [error, setError] = useState(initialError);
   const [busy, setBusy] = useState(false);
@@ -34,7 +42,7 @@ export function Wallets({
   );
   useEffect(() => {
     const pending = readAttempt<{ key: string; path: string; body: string }>(
-      'wallets',
+      scope,
     );
     if (
       pending &&
@@ -44,7 +52,7 @@ export function Wallets({
       attempt.current = pending;
       restored((value) => value + 1);
     }
-  }, []);
+  }, [scope]);
   async function reload() {
     const request = ++revision.current;
     try {
@@ -77,7 +85,7 @@ export function Wallets({
       path,
       body: JSON.stringify(body),
     };
-    writeAttempt('wallets', attempt.current);
+    writeAttempt(scope, attempt.current);
     try {
       const saved = attempt.current;
       await clientFetch(saved.path, {
@@ -86,12 +94,12 @@ export function Wallets({
         body: saved.body,
       });
       attempt.current = null;
-      clearAttempt('wallets');
+      clearAttempt(scope);
       await reload();
     } catch (err) {
       if (err instanceof ApiError && isDefinitiveRejection(err.status)) {
         attempt.current = null;
-        clearAttempt('wallets');
+        clearAttempt(scope);
       }
       setError((err as Error).message);
     } finally {

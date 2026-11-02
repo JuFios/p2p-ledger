@@ -69,7 +69,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
 });
 async function mount(Component, props) {
-  await act(async () => root.render(React.createElement(Component, props)));
+  await act(async () => root.render(React.createElement(Component, { userId: 'alice', ...props })));
 }
 async function remount(Component, props) {
   await act(async () => root.unmount());
@@ -248,4 +248,63 @@ test('blocked session storage keeps the existing in-memory retry behavior', asyn
   } finally {
     Object.defineProperty(window, 'sessionStorage', original);
   }
+});
+
+test('bill drafts cannot be restored or replayed by another account', async () => {
+  const calls = [];
+  const { CreateBillForm } = loadSource('app/split-bills/create-form.tsx', {
+    'next/navigation': { useRouter: () => ({ push() {} }) },
+    './actions': { createBill: async (data) => {
+      calls.push([...data.entries()]);
+      return { error: 'uncertain', status: 503 };
+    } },
+  });
+  await mount(CreateBillForm, { userId: 'alice' });
+  container.querySelector('[name=title]').value = 'Alice private dinner';
+  container.querySelector('[name=totalAmount]').value = '10';
+  container.querySelector('[name=participants]').value = 'alice-friend@example.com';
+  await submit(container.querySelector('form'));
+  await remount(CreateBillForm, { userId: 'bob' });
+  assert.equal(container.querySelector('[name=title]').value, '');
+  assert.equal(container.querySelector('[name=participants]').value, '');
+  assert.equal(container.querySelector('fieldset').disabled, false);
+  container.querySelector('[name=title]').value = 'Bob lunch';
+  container.querySelector('[name=totalAmount]').value = '20';
+  container.querySelector('[name=participants]').value = 'bob-friend@example.com';
+  await submit(container.querySelector('form'));
+  assert.equal(new Map(calls[1]).get('title'), 'Bob lunch');
+  assert.notEqual(new Map(calls[0]).get('key'), new Map(calls[1]).get('key'));
+  await remount(CreateBillForm, { userId: 'alice' });
+  assert.equal(container.querySelector('[name=title]').value, 'Alice private dinner');
+});
+test('wallet mutations stay with their account across logout and login', async (t) => {
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    if (init?.method === 'POST') calls.push(JSON.parse(init.body));
+    return json(503, { message: 'uncertain' });
+  });
+  const { Wallets } = loadSource('app/wallets/wallets.tsx', live);
+  await mount(Wallets, { initial: [], initialError: null, userId: 'alice' });
+  container.querySelector('[name=currency]').value = 'EUR';
+  await submit(container.querySelector('form'));
+  await remount(Wallets, { initial: [], initialError: null, userId: 'bob' });
+  assert.equal(button('Повторити попередній запит'), undefined);
+  assert.equal(container.querySelector('fieldset').disabled, false);
+  container.querySelector('[name=currency]').value = 'UAH';
+  await submit(container.querySelector('form'));
+  assert.deepEqual(calls, [{ currency: 'EUR' }, { currency: 'UAH' }]);
+  await remount(Wallets, { initial: [], initialError: null, userId: 'alice' });
+  assert.ok(button('Повторити попередній запит'));
+});
+test('legacy drafts without an owner are ignored', async () => {
+  window.sessionStorage.setItem('p2p-ledger:split-create', JSON.stringify({
+    key: 'old-key', body: [['title', 'Private'], ['mode', 'EQUAL']],
+  }));
+  const { CreateBillForm } = loadSource('app/split-bills/create-form.tsx', {
+    'next/navigation': { useRouter: () => ({ push() {} }) },
+    './actions': { createBill: async () => ({}) },
+  });
+  await mount(CreateBillForm, { userId: 'bob' });
+  assert.equal(container.querySelector('[name=title]').value, '');
+  assert.equal(container.querySelector('fieldset').disabled, false);
 });

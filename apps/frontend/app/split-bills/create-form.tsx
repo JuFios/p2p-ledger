@@ -1,14 +1,20 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { clearAttempt, readAttempt, writeAttempt } from '@/lib/attempt-storage';
+import {
+  attemptScope,
+  clearAttempt,
+  readAttempt,
+  writeAttempt,
+} from '@/lib/attempt-storage';
 import { useRouter } from 'next/navigation';
 import { CURRENCIES } from '@/lib/types';
 import { Alert, Button, Card, Field } from '@/components/ui/index';
 import { isDefinitiveRejection } from '@/lib/http';
 import { createBill } from './actions';
 
-export function CreateBillForm() {
+export function CreateBillForm({ userId }: { userId: string }) {
+  const scope = attemptScope(userId, 'split-create');
   const router = useRouter();
   const [mode, setMode] = useState('EQUAL');
   const [busy, setBusy] = useState(false);
@@ -17,7 +23,7 @@ export function CreateBillForm() {
   const [restored, setRestored] = useState<Record<string, string> | null>(null);
   useEffect(() => {
     const pending = readAttempt<{ key: string; body: [string, string][] }>(
-      'split-create',
+      scope,
     );
     if (!pending) return;
     try {
@@ -47,9 +53,9 @@ export function CreateBillForm() {
       setRestored(fields);
       setMode(fields.mode);
     } catch {
-      clearAttempt('split-create');
+      clearAttempt(scope);
     }
-  }, []);
+  }, [scope]);
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
@@ -60,7 +66,7 @@ export function CreateBillForm() {
     }
     if (!saved.current.has('key'))
       saved.current.set('key', crypto.randomUUID());
-    writeAttempt('split-create', {
+    writeAttempt(scope, {
       key: String(saved.current.get('key')),
       body: Array.from(saved.current.entries(), ([key, value]) => [
         key,
@@ -75,11 +81,11 @@ export function CreateBillForm() {
         setError(result.error);
         if (result.status && isDefinitiveRejection(result.status)) {
           saved.current = null;
-          clearAttempt('split-create');
+          clearAttempt(scope);
           setRestored(null);
         }
       } else if (result.id) {
-        clearAttempt('split-create');
+        clearAttempt(scope);
         router.push(`/split-bills/${result.id}`);
       }
     } catch {

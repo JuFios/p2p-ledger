@@ -1,9 +1,12 @@
+import { sessionClaims } from '@/lib/session';
+import { cookies } from 'next/headers';
 import { bffFetch } from '@/lib/api';
 import { SplitBill } from '@/lib/types';
 import { dateLabel, money, statusLabels } from '@/lib/format';
 import { Badge, Card, EmptyState, PageHeading } from '@/components/ui/index';
 import { CreateBillForm } from '@/app/split-bills/create-form';
 export default async function SplitBillsPage() {
+  const userId = sessionClaims(cookies().get('accessToken')?.value)?.sub ?? '';
   const bills = await bffFetch<SplitBill[]>('/split-bills');
   return (
     <main className="page">
@@ -90,7 +93,7 @@ export default async function SplitBillsPage() {
           })}
         </div>
         <div className="lg:col-span-5">
-          <CreateBillForm />
+          <CreateBillForm key={userId} userId={userId} />
         </div>
       </div>
     </main>

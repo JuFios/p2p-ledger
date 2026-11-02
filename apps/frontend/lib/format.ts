@@ -36,8 +36,7 @@ export function failureLabel(reason: string) {
   return (
     (
       {
-        RECIPIENT_FROZEN:
-          'Гаманець отримувача заморожено. Резерв повернено відправнику.',
+        RECIPIENT_FROZEN: 'Гаманець отримувача заморожено.',
         WALLET_FROZEN: 'Гаманець заморожено.',
         INSUFFICIENT_FUNDS: 'Недостатньо доступних коштів.',
         SELF_TRANSFER: 'Оберіть іншого отримувача.',

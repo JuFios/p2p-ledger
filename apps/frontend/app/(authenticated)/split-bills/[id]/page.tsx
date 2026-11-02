@@ -7,6 +7,7 @@ import { uuid } from '@/lib/validation';
 import { BillDetails } from '@/app/split-bills/[id]/bill-details';
 
 export default async function BillPage({ params }: { params: { id: string } }) {
+  const userId = sessionClaims(cookies().get('accessToken')?.value)?.sub ?? '';
   if (!uuid(params.id)) notFound();
   let bill: SplitBill;
   try {
@@ -26,6 +27,8 @@ export default async function BillPage({ params }: { params: { id: string } }) {
   return (
     <main className="page">
       <BillDetails
+        key={userId}
+        userId={userId}
         initial={bill}
         initialWallets={wallets}
         email={email}

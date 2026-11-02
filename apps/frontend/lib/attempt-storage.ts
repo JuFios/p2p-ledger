@@ -4,9 +4,14 @@ export interface StoredAttempt<T = string> {
 }
 const prefix = 'p2p-ledger:';
 
+export function attemptScope(userId: string, scope: string): string | null {
+  return userId ? `v2:${userId}:${scope}` : null;
+}
+
 export function readAttempt<T extends StoredAttempt<unknown>>(
-  scope: string,
+  scope: string | null,
 ): T | null {
+  if (!scope) return null;
   try {
     const value = JSON.parse(
       window.sessionStorage.getItem(prefix + scope) ?? 'null',
@@ -24,12 +29,14 @@ export function readAttempt<T extends StoredAttempt<unknown>>(
     return null;
   }
 }
-export function writeAttempt(scope: string, value: StoredAttempt<unknown>) {
+export function writeAttempt(scope: string | null, value: StoredAttempt<unknown>) {
+  if (!scope) return;
   try {
     window.sessionStorage.setItem(prefix + scope, JSON.stringify(value));
   } catch {}
 }
-export function clearAttempt(scope: string) {
+export function clearAttempt(scope: string | null) {
+  if (!scope) return;
   try {
     window.sessionStorage.removeItem(prefix + scope);
   } catch {}

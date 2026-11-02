@@ -1,7 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { clearAttempt, readAttempt, writeAttempt } from '@/lib/attempt-storage';
+import {
+  attemptScope,
+  clearAttempt,
+  readAttempt,
+  writeAttempt,
+} from '@/lib/attempt-storage';
 import { ApiError, clientFetch, isDefinitiveRejection } from '@/lib/http';
 import { isFinal, SplitBill, Transfer, Wallet } from '@/lib/types';
 import { useLiveSocket } from '@/lib/use-live-socket';
@@ -20,11 +25,13 @@ import { TransferProgress } from '@/components/transfer-progress';
 import { acceptShare } from '../actions';
 
 export function BillDetails({
+  userId,
   initial,
   initialWallets,
   email,
   initialError,
 }: {
+  userId: string;
   initial: SplitBill;
   initialWallets: Wallet[];
   email: string;
@@ -67,7 +74,7 @@ export function BillDetails({
     },
   });
   const own = bill.shares.find((share) => share.participantEmail === email);
-  const scope = `split-pay:${bill.id}:${own?.id ?? ''}`;
+  const scope = attemptScope(userId, `split-pay:${bill.id}:${own?.id ?? ''}`);
   useEffect(() => {
     if (!own) return;
     if (own.status === 'PAID') {

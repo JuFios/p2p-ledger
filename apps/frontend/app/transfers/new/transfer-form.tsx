@@ -1,7 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { clearAttempt, readAttempt, writeAttempt } from '@/lib/attempt-storage';
+import {
+  attemptScope,
+  clearAttempt,
+  readAttempt,
+  writeAttempt,
+} from '@/lib/attempt-storage';
 import { ApiError, clientFetch, isDefinitiveRejection } from '@/lib/http';
 import { CURRENCIES, isFinal, Transfer, Wallet } from '@/lib/types';
 import { useLiveSocket } from '@/lib/use-live-socket';
@@ -11,9 +16,11 @@ import { Alert, Button, Card, EmptyState, Field } from '@/components/ui/index';
 import { TransferProgress } from '@/components/transfer-progress';
 
 export function TransferForm({
+  userId,
   initialWallets,
   initialError,
 }: {
+  userId: string;
   initialWallets: Wallet[];
   initialError: string | null;
 }) {
@@ -35,7 +42,7 @@ export function TransferForm({
   useEffect(() => {
     if (attempt.current) return;
     for (const candidate of wallets) {
-      const scope = `transfer:${candidate.id}`;
+      const scope = attemptScope(userId, `transfer:${candidate.id}`);
       const pending = readAttempt<{ key: string; body: string }>(scope);
       if (!pending) continue;
       try {
@@ -55,11 +62,11 @@ export function TransferForm({
         clearAttempt(scope);
       }
     }
-  }, [wallets]);
+  }, [wallets, userId]);
   useEffect(() => {
     if (monitor.transfer && isFinal(monitor.transfer))
-      clearAttempt(`transfer:${walletId}`);
-  }, [monitor.transfer, walletId]);
+      clearAttempt(attemptScope(userId, `transfer:${walletId}`));
+  }, [monitor.transfer, walletId, userId]);
   async function reload() {
     try {
       const values = await clientFetch<Wallet[]>('/wallets');
@@ -95,7 +102,7 @@ export function TransferForm({
     }
     setBusy(true);
     setError(null);
-    writeAttempt(`transfer:${walletId}`, attempt.current);
+    writeAttempt(attemptScope(userId, `transfer:${walletId}`), attempt.current);
     try {
       const saved = attempt.current;
       const value = await clientFetch<Transfer>('/transfers', {
@@ -106,7 +113,7 @@ export function TransferForm({
       monitor.track(value);
     } catch (err) {
       if (err instanceof ApiError && isDefinitiveRejection(err.status)) {
-        clearAttempt(`transfer:${walletId}`);
+        clearAttempt(attemptScope(userId, `transfer:${walletId}`));
         attempt.current = null;
         setRestored(null);
       }
@@ -267,7 +274,7 @@ export function TransferForm({
               className="w-full"
               variant="secondary"
               onClick={() => {
-                clearAttempt(`transfer:${walletId}`);
+                clearAttempt(attemptScope(userId, `transfer:${walletId}`));
                 attempt.current = null;
                 setRestored(null);
                 monitor.track(null);
