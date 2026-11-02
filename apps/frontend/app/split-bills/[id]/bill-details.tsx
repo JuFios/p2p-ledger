@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { clearAttempt, readAttempt, writeAttempt } from '@/lib/attempt-storage';
 import { ApiError, clientFetch, isDefinitiveRejection } from '@/lib/http';
 import { isFinal, SplitBill, Transfer, Wallet } from '@/lib/types';
 import { useLiveSocket } from '@/lib/use-live-socket';
@@ -33,6 +34,7 @@ export function BillDetails({
   const [wallets, setWallets] = useState(initialWallets);
   const [error, setError] = useState(initialError);
   const [busy, setBusy] = useState(false);
+  const [restoredWallet, setRestoredWallet] = useState<string | null>(null);
   const attempt = useRef<{ key: string; shareId: string; body: string } | null>(
     null,
   );
@@ -65,6 +67,34 @@ export function BillDetails({
     },
   });
   const own = bill.shares.find((share) => share.participantEmail === email);
+  const scope = `split-pay:${bill.id}:${own?.id ?? ''}`;
+  useEffect(() => {
+    if (!own) return;
+    if (own.status === 'PAID') {
+      clearAttempt(scope);
+      attempt.current = null;
+      setRestoredWallet(null);
+      return;
+    }
+    if (attempt.current) return;
+    const pending = readAttempt<{ key: string; shareId: string; body: string }>(
+      scope,
+    );
+    if (!pending) return;
+    try {
+      if (pending.shareId !== own.id || typeof pending.body !== 'string')
+        throw new Error();
+      const body = JSON.parse(pending.body);
+      if (typeof body.fromWalletId !== 'string') throw new Error();
+      attempt.current = pending;
+      setRestoredWallet(body.fromWalletId);
+    } catch {
+      clearAttempt(scope);
+    }
+  }, [scope, own]);
+  useEffect(() => {
+    if (monitor.transfer && isFinal(monitor.transfer)) clearAttempt(scope);
+  }, [monitor.transfer, scope]);
   const choices = wallets.filter(
     (wallet) => wallet.currency === bill.currency && !wallet.frozen,
   );
@@ -116,6 +146,7 @@ export function BillDetails({
     setError(null);
     try {
       const saved = attempt.current;
+      writeAttempt(scope, saved);
       const value = await clientFetch<Transfer>(
         `/split-bills/${bill.id}/shares/${saved.shareId}/pay`,
         {
@@ -127,8 +158,11 @@ export function BillDetails({
       monitor.track(value);
       await reload();
     } catch (err) {
-      if (err instanceof ApiError && isDefinitiveRejection(err.status))
+      if (err instanceof ApiError && isDefinitiveRejection(err.status)) {
         attempt.current = null;
+        clearAttempt(scope);
+        setRestoredWallet(null);
+      }
       setError((err as Error).message);
     } finally {
       setBusy(false);
@@ -274,6 +308,8 @@ export function BillDetails({
                 <form onSubmit={pay}>
                   <Field id="share-wallet" label="Гаманець для оплати">
                     <select
+                      key={restoredWallet ?? 'new'}
+                      defaultValue={restoredWallet ?? undefined}
                       name="walletId"
                       disabled={busy || !!attempt.current}
                       required
@@ -315,7 +351,9 @@ export function BillDetails({
               variant="secondary"
               className="w-full"
               onClick={() => {
+                clearAttempt(scope);
                 attempt.current = null;
+                setRestoredWallet(null);
                 monitor.track(null);
                 void reload();
               }}

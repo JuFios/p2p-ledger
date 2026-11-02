@@ -1,6 +1,7 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { clearAttempt, readAttempt, writeAttempt } from '@/lib/attempt-storage';
 import { useRouter } from 'next/navigation';
 import { CURRENCIES } from '@/lib/types';
 import { Alert, Button, Card, Field } from '@/components/ui/index';
@@ -13,6 +14,42 @@ export function CreateBillForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const saved = useRef<FormData | null>(null);
+  const [restored, setRestored] = useState<Record<string, string> | null>(null);
+  useEffect(() => {
+    const pending = readAttempt<{ key: string; body: [string, string][] }>(
+      'split-create',
+    );
+    if (!pending) return;
+    try {
+      if (
+        !Array.isArray(pending.body) ||
+        !pending.body.every(
+          (pair) =>
+            Array.isArray(pair) &&
+            pair.length === 2 &&
+            pair.every((value) => typeof value === 'string'),
+        )
+      )
+        throw new Error();
+      const data = new FormData();
+      for (const [key, value] of pending.body) data.append(key, value);
+      data.set('key', pending.key);
+      const fields = Object.fromEntries(pending.body);
+      fields.key = pending.key;
+      if (!['EQUAL', 'CUSTOM'].includes(fields.mode)) throw new Error();
+      if (fields.dueAt) {
+        const due = new Date(fields.dueAt);
+        fields.dueAt = new Date(due.getTime() - due.getTimezoneOffset() * 60000)
+          .toISOString()
+          .slice(0, 16);
+      }
+      saved.current = data;
+      setRestored(fields);
+      setMode(fields.mode);
+    } catch {
+      clearAttempt('split-create');
+    }
+  }, []);
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
@@ -23,15 +60,26 @@ export function CreateBillForm() {
     }
     if (!saved.current.has('key'))
       saved.current.set('key', crypto.randomUUID());
+    writeAttempt('split-create', {
+      key: String(saved.current.get('key')),
+      body: Array.from(saved.current.entries(), ([key, value]) => [
+        key,
+        String(value),
+      ]),
+    });
     setBusy(true);
     setError(null);
     try {
       const result = await createBill(saved.current);
       if (result.error) {
         setError(result.error);
-        if (result.status && isDefinitiveRejection(result.status))
+        if (result.status && isDefinitiveRejection(result.status)) {
           saved.current = null;
+          clearAttempt('split-create');
+          setRestored(null);
+        }
       } else if (result.id) {
+        clearAttempt('split-create');
         router.push(`/split-bills/${result.id}`);
       }
     } catch {
@@ -62,7 +110,11 @@ export function CreateBillForm() {
           </Alert>
         </div>
       )}
-      <form id="create-bill-form" onSubmit={submit}>
+      <form
+        key={restored?.key ?? 'new'}
+        id="create-bill-form"
+        onSubmit={submit}
+      >
         <fieldset
           disabled={busy || !!saved.current}
           className="grid gap-5 border-0 p-0"
@@ -70,6 +122,7 @@ export function CreateBillForm() {
           <Field id="bill-title" label="Назва">
             <input
               name="title"
+              defaultValue={restored?.title}
               maxLength={100}
               placeholder="Вечеря з друзями"
               required
@@ -79,6 +132,7 @@ export function CreateBillForm() {
             <Field id="bill-total" label="Загальна сума">
               <input
                 name="totalAmount"
+                defaultValue={restored?.totalAmount}
                 type="number"
                 min="0.01"
                 max="1000000"
@@ -88,7 +142,10 @@ export function CreateBillForm() {
               />
             </Field>
             <Field id="bill-currency" label="Валюта">
-              <select name="currency">
+              <select
+                name="currency"
+                defaultValue={restored?.currency ?? 'USD'}
+              >
                 {CURRENCIES.map((c) => (
                   <option key={c}>{c}</option>
                 ))}
@@ -112,6 +169,7 @@ export function CreateBillForm() {
           >
             <textarea
               name="participants"
+              defaultValue={restored?.participants}
               rows={4}
               required
               placeholder={
@@ -122,7 +180,11 @@ export function CreateBillForm() {
             />
           </Field>
           <Field id="bill-due" label="Термін оплати (необов’язково)">
-            <input name="dueAt" type="datetime-local" />
+            <input
+              name="dueAt"
+              type="datetime-local"
+              defaultValue={restored?.dueAt}
+            />
           </Field>
         </fieldset>
         <Button loading={busy} className="mt-6 w-full">

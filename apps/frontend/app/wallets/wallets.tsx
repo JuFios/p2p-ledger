@@ -1,6 +1,7 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { clearAttempt, readAttempt, writeAttempt } from '@/lib/attempt-storage';
 import { ApiError, clientFetch, isDefinitiveRejection } from '@/lib/http';
 import { CURRENCIES, Wallet } from '@/lib/types';
 import { useLiveSocket } from '@/lib/use-live-socket';
@@ -25,11 +26,25 @@ export function Wallets({
   const [wallets, setWallets] = useState(initial);
   const [error, setError] = useState(initialError);
   const [busy, setBusy] = useState(false);
+  const [, restored] = useState(0);
   const revision = useRef(0);
   const [changed, setChanged] = useState<string | null>(null);
   const attempt = useRef<{ key: string; path: string; body: string } | null>(
     null,
   );
+  useEffect(() => {
+    const pending = readAttempt<{ key: string; path: string; body: string }>(
+      'wallets',
+    );
+    if (
+      pending &&
+      typeof pending.path === 'string' &&
+      typeof pending.body === 'string'
+    ) {
+      attempt.current = pending;
+      restored((value) => value + 1);
+    }
+  }, []);
   async function reload() {
     const request = ++revision.current;
     try {
@@ -62,6 +77,7 @@ export function Wallets({
       path,
       body: JSON.stringify(body),
     };
+    writeAttempt('wallets', attempt.current);
     try {
       const saved = attempt.current;
       await clientFetch(saved.path, {
@@ -70,10 +86,13 @@ export function Wallets({
         body: saved.body,
       });
       attempt.current = null;
+      clearAttempt('wallets');
       await reload();
     } catch (err) {
-      if (err instanceof ApiError && isDefinitiveRejection(err.status))
+      if (err instanceof ApiError && isDefinitiveRejection(err.status)) {
         attempt.current = null;
+        clearAttempt('wallets');
+      }
       setError((err as Error).message);
     } finally {
       setBusy(false);

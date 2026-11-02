@@ -1,6 +1,7 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { clearAttempt, readAttempt, writeAttempt } from '@/lib/attempt-storage';
 import { ApiError, clientFetch, isDefinitiveRejection } from '@/lib/http';
 import { CURRENCIES, isFinal, Transfer, Wallet } from '@/lib/types';
 import { useLiveSocket } from '@/lib/use-live-socket';
@@ -23,8 +24,42 @@ export function TransferForm({
   const [error, setError] = useState(initialError);
   const [busy, setBusy] = useState(false);
   const attempt = useRef<{ key: string; body: string } | null>(null);
+  const [restored, setRestored] = useState<{
+    key: string;
+    toWalletIdentifier: string;
+    amount: number;
+    toCurrency: string;
+  } | null>(null);
   const monitor = useTransfer();
   const wallet = wallets.find((w) => w.id === walletId);
+  useEffect(() => {
+    if (attempt.current) return;
+    for (const candidate of wallets) {
+      const scope = `transfer:${candidate.id}`;
+      const pending = readAttempt<{ key: string; body: string }>(scope);
+      if (!pending) continue;
+      try {
+        if (typeof pending.body !== 'string') throw new Error();
+        const body = JSON.parse(pending.body);
+        if (
+          body.fromWalletId !== candidate.id ||
+          typeof body.toWalletIdentifier !== 'string' ||
+          typeof body.amount !== 'number'
+        )
+          throw new Error();
+        attempt.current = pending;
+        setWalletId(candidate.id);
+        setRestored({ key: pending.key, ...body });
+        break;
+      } catch {
+        clearAttempt(scope);
+      }
+    }
+  }, [wallets]);
+  useEffect(() => {
+    if (monitor.transfer && isFinal(monitor.transfer))
+      clearAttempt(`transfer:${walletId}`);
+  }, [monitor.transfer, walletId]);
   async function reload() {
     try {
       const values = await clientFetch<Wallet[]>('/wallets');
@@ -60,6 +95,7 @@ export function TransferForm({
     }
     setBusy(true);
     setError(null);
+    writeAttempt(`transfer:${walletId}`, attempt.current);
     try {
       const saved = attempt.current;
       const value = await clientFetch<Transfer>('/transfers', {
@@ -69,8 +105,11 @@ export function TransferForm({
       });
       monitor.track(value);
     } catch (err) {
-      if (err instanceof ApiError && isDefinitiveRejection(err.status))
+      if (err instanceof ApiError && isDefinitiveRejection(err.status)) {
+        clearAttempt(`transfer:${walletId}`);
         attempt.current = null;
+        setRestored(null);
+      }
       setError((err as Error).message);
     } finally {
       setBusy(false);
@@ -107,7 +146,7 @@ export function TransferForm({
           <p className="muted mb-6 mt-2">
             Оберіть гаманець і вкажіть email отримувача.
           </p>
-          <form onSubmit={submit}>
+          <form key={restored?.key ?? 'new'} onSubmit={submit}>
             <fieldset disabled={locked} className="grid gap-5 border-0 p-0">
               <Field id="sender-wallet" label="Гаманець відправника">
                 <select
@@ -134,6 +173,7 @@ export function TransferForm({
               >
                 <input
                   name="email"
+                  defaultValue={restored?.toWalletIdentifier}
                   type="email"
                   placeholder="friend@example.com"
                   required
@@ -146,6 +186,7 @@ export function TransferForm({
                 >
                   <input
                     name="amount"
+                    defaultValue={restored?.amount}
                     type="number"
                     min="0.01"
                     max="1000000"
@@ -157,7 +198,9 @@ export function TransferForm({
                 <Field id="recipient-currency" label="Валюта отримувача">
                   <select
                     name="toCurrency"
-                    defaultValue={wallet?.currency ?? 'USD'}
+                    defaultValue={
+                      restored?.toCurrency ?? wallet?.currency ?? 'USD'
+                    }
                     key={wallet?.currency}
                   >
                     {CURRENCIES.map((c) => (
@@ -224,7 +267,9 @@ export function TransferForm({
               className="w-full"
               variant="secondary"
               onClick={() => {
+                clearAttempt(`transfer:${walletId}`);
                 attempt.current = null;
+                setRestored(null);
                 monitor.track(null);
                 void reload();
               }}
