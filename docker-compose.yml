@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: ledger
       POSTGRES_DB: ledger
     ports:
-      - '5433:5432'
+      - '127.0.0.1:5433:5432'
     volumes:
       - ledger-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +24,7 @@ services:
       POSTGRES_PASSWORD: payments
       POSTGRES_DB: payments
     ports:
-      - '5434:5432'
+      - '127.0.0.1:5434:5432'
     volumes:
       - payments-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -40,7 +40,7 @@ services:
       POSTGRES_PASSWORD: notifications
       POSTGRES_DB: notifications
     ports:
-      - '5435:5432'
+      - '127.0.0.1:5435:5432'
     volumes:
       - notifications-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -55,7 +55,7 @@ services:
     volumes:
       - redis-data:/data
     ports:
-      - '6379:6379'
+      - '127.0.0.1:6379:6379'
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
@@ -65,8 +65,8 @@ services:
   jaeger:
     image: jaegertracing/jaeger:2.8.0
     ports:
-      - '16686:16686'
-      - '4318:4318'
+      - '127.0.0.1:16686:16686'
+      - '127.0.0.1:4318:4318'
 
   ledger-service:
     build: ./apps/ledger-service
@@ -79,7 +79,7 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - '3001:3001'
+      - '127.0.0.1:3001:3001'
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://localhost:3001/health || exit 1']
       interval: 5s
@@ -97,7 +97,7 @@ services:
       ledger-service:
         condition: service_started
     ports:
-      - '3002:3002'
+      - '127.0.0.1:3002:3002'
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://localhost:3002/health || exit 1']
       interval: 5s
@@ -113,7 +113,7 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - '3003:3003'
+      - '127.0.0.1:3003:3003'
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://localhost:3003/health || exit 1']
       interval: 5s
@@ -131,7 +131,7 @@ services:
       notifications-service:
         condition: service_healthy
     ports:
-      - '3004:3004'
+      - '127.0.0.1:3004:3004'
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://localhost:3004/health || exit 1']
       interval: 5s
@@ -148,7 +148,7 @@ services:
       bff:
         condition: service_healthy
     ports:
-      - '3000:3000'
+      - '127.0.0.1:3000:3000'
 
 volumes:
   redis-data:
