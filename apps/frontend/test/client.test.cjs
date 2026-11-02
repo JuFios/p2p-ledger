@@ -2,6 +2,7 @@ const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { JSDOM } = require('jsdom');
 const { loadSource } = require('./load-source.cjs');
+const { EventEmitter } = require('node:events');
 
 const dom = new JSDOM('<!doctype html><div id="root"></div>', {
   url: 'http://localhost:3000',
@@ -50,6 +51,40 @@ async function submit(form) {
     );
   });
 }
+
+test('wallet UI reloads a missed balance through useLiveSocket on reconnect', async (t) => {
+  const socket = new EventEmitter();
+  socket.connect = () => socket.emit('connect');
+  socket.disconnect = () => socket.emit('disconnect');
+  let current = wallet;
+  let reads = 0;
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    if (url === '/api/auth/ws-token')
+      return json(200, { token: 'test-token', url: 'http://localhost:3003' });
+    assert.equal(url, '/api/bff/wallets');
+    reads++;
+    return json(200, [current]);
+  });
+  const { Wallets } = loadSource('app/wallets/wallets.tsx', {
+    'socket.io-client': { io: () => socket },
+  });
+  await act(async () =>
+    root.render(
+      React.createElement(Wallets, { initial: [wallet], initialError: null }),
+    ),
+  );
+  assert.equal(reads, 1);
+  assert.match(container.textContent, /100\.00/);
+  await act(async () => socket.emit('disconnect'));
+  current = { ...wallet, balance: '123.45', available: '123.45' };
+  assert.match(container.textContent, /100\.00/);
+  await act(async () => socket.emit('connect'));
+  assert.equal(reads, 2);
+  assert.match(container.textContent, /123\.45/);
+  assert.doesNotMatch(container.textContent, /100\.00/);
+  await act(async () => root.render(null));
+  assert.equal(socket.listenerCount('connect'), 0);
+});
 
 for (const status of [401, 403, 408, 429]) {
   test(`transfer keeps its key and body after an uncertain result followed by ${status}`, async (t) => {
