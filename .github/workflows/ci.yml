@@ -81,6 +81,11 @@ jobs:
           DATABASE_NAME: ledger
           JWT_ACCESS_SECRET: ci-access-secret
           JWT_REFRESH_SECRET: ci-refresh-secret
+          INTERNAL_API_TOKEN: ci-internal-token
+          ADMIN_EMAIL: e2e-admin@example.com
+          ADMIN_PASSWORD: e2e-admin-password
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
 
   payments-service:
     runs-on: ubuntu-latest

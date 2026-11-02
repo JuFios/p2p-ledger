@@ -52,7 +52,7 @@ export class AuthService {
     let payload: { sub: string };
     try {
       payload = this.jwt.verify(refreshToken, {
-        secret: process.env.JWT_REFRESH_SECRET ?? 'change-me-refresh',
+        secret: process.env.JWT_REFRESH_SECRET,
       });
     } catch {
       throw new UnauthorizedException('Невалідний refresh token');
@@ -76,11 +76,11 @@ export class AuthService {
   private async issueTokens(user: User): Promise<TokenPair> {
     const payload = { sub: user.id, email: user.email, role: user.role };
     const accessToken = this.jwt.sign(payload, {
-      secret: process.env.JWT_ACCESS_SECRET ?? 'change-me-access',
+      secret: process.env.JWT_ACCESS_SECRET!,
       expiresIn: process.env.JWT_ACCESS_TTL ?? '15m',
     });
     const refreshToken = this.jwt.sign(payload, {
-      secret: process.env.JWT_REFRESH_SECRET ?? 'change-me-refresh',
+      secret: process.env.JWT_REFRESH_SECRET,
       expiresIn: process.env.JWT_REFRESH_TTL ?? '7d',
       jwtid: randomUUID(),
     });
@@ -93,7 +93,7 @@ export class AuthService {
     let payload: { sub: string };
     try {
       payload = this.jwt.verify(refreshToken, {
-        secret: process.env.JWT_REFRESH_SECRET ?? 'change-me-refresh',
+        secret: process.env.JWT_REFRESH_SECRET,
       });
     } catch { return; }
     const user = await this.users.findOne({ where: { id: payload.sub } });
