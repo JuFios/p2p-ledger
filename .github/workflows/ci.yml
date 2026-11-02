@@ -8,6 +8,7 @@ on:
 
 jobs:
   system-e2e:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/solution'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
