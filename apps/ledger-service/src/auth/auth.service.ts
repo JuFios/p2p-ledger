@@ -70,10 +70,13 @@ export class AuthService {
     if (!matches) {
       throw new UnauthorizedException('Refresh token відкликано');
     }
-    return this.issueTokens(user);
+    return this.issueTokens(user, user.refreshTokenHash);
   }
 
-  private async issueTokens(user: User): Promise<TokenPair> {
+  private async issueTokens(
+    user: User,
+    expectedRefreshHash?: string,
+  ): Promise<TokenPair> {
     const payload = { sub: user.id, email: user.email, role: user.role };
     const accessToken = this.jwt.sign(payload, {
       secret: process.env.JWT_ACCESS_SECRET!,
@@ -84,8 +87,19 @@ export class AuthService {
       expiresIn: process.env.JWT_REFRESH_TTL ?? '7d',
       jwtid: randomUUID(),
     });
-    user.refreshTokenHash = createHash('sha256').update(refreshToken).digest('hex');
-    await this.users.save(user);
+    user.refreshTokenHash = createHash('sha256')
+      .update(refreshToken)
+      .digest('hex');
+    if (expectedRefreshHash !== undefined) {
+      const result = await this.users.update(
+        { id: user.id, refreshTokenHash: expectedRefreshHash },
+        { refreshTokenHash: user.refreshTokenHash },
+      );
+      if (result.affected !== 1)
+        throw new UnauthorizedException('Refresh token відкликано');
+    } else {
+      await this.users.save(user);
+    }
     return { accessToken, refreshToken };
   }
 
@@ -95,12 +109,17 @@ export class AuthService {
       payload = this.jwt.verify(refreshToken, {
         secret: process.env.JWT_REFRESH_SECRET,
       });
-    } catch { return; }
+    } catch {
+      return;
+    }
     const user = await this.users.findOne({ where: { id: payload.sub } });
     if (!user?.refreshTokenHash) return;
-    const actual = Buffer.from(createHash('sha256').update(refreshToken).digest('hex'));
+    const actual = Buffer.from(
+      createHash('sha256').update(refreshToken).digest('hex'),
+    );
     const expected = Buffer.from(user.refreshTokenHash);
-    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return;
+    if (actual.length !== expected.length || !timingSafeEqual(actual, expected))
+      return;
     // Умова захищає нову сесію, створену паралельно з logout.
     await this.users.update(
       { id: user.id, refreshTokenHash: user.refreshTokenHash },
