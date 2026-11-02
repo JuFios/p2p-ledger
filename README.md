@@ -352,6 +352,12 @@ CHECK-обмеження захищають невід'ємні проєкції
 
 ## Сповіщення (notifications-service)
 
+Для access-токенів застосунку gateway запам’ятовує `exp` під час handshake
+і розриває з’єднання в момент завершення строку. Таймер не утримує процес
+і очищається при відключенні клієнта. Після `io server disconnect` frontend
+явно перепідключається з новим токеном через `/api/auth/ws-token`, а `connect`
+запускає REST-відновлення пропущеного стану.
+
 Сервіс читає `stream:ledger-events` і `stream:payments-events` у consumer group
 `notifications`. `processed_events.event_id` запобігає повторній обробці:
 маркер і рядки `activity` комітяться однією транзакцією, потім відправляються
