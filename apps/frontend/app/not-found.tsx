@@ -1,9 +1,17 @@
+import { EmptyState } from '@/components/ui/index';
 export default function NotFound() {
   return (
-    <main style={{ maxWidth: 600, margin: '48px auto', padding: 16 }}>
-      <h1>Рахунок не знайдено</h1>
-      <p>Перевірте посилання та доступ до рахунку.</p>
-      <a href="/split-bills">До спільних рахунків</a>
+    <main className="page">
+      <EmptyState
+        level={1}
+        title="Рахунок не знайдено"
+        description="Перевірте посилання та доступ до рахунку."
+        action={
+          <a className="button-primary" href="/split-bills">
+            До спільних рахунків
+          </a>
+        }
+      />
     </main>
   );
 }

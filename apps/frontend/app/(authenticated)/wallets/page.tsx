@@ -1,6 +1,7 @@
+import { PageHeading } from '@/components/ui/index';
 import { bffFetch } from '@/lib/api';
 import { Wallet } from '@/lib/types';
-import { Wallets } from './wallets';
+import { Wallets } from '@/app/wallets/wallets';
 
 export default async function WalletsPage() {
   let wallets: Wallet[] = [];
@@ -11,8 +12,11 @@ export default async function WalletsPage() {
     error = (err as Error).message;
   }
   return (
-    <main style={{ maxWidth: 600, margin: '48px auto', padding: 16 }}>
-      <h1>Мої гаманці</h1>
+    <main className="page">
+      <PageHeading
+        title="Мої гаманці"
+        description="Усі валюти в одному місці. Баланс оновлюється наживо."
+      />
       <Wallets initial={wallets} initialError={error} />
     </main>
   );

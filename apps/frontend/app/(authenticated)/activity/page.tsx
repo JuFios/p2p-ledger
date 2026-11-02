@@ -1,6 +1,7 @@
+import { PageHeading } from '@/components/ui/index';
 import { bffFetch } from '@/lib/api';
 import { Activity } from '@/lib/types';
-import { ActivityFeed } from './activity-feed';
+import { ActivityFeed } from '@/app/activity/activity-feed';
 
 export default async function ActivityPage() {
   let activity: Activity[] = [];
@@ -11,8 +12,11 @@ export default async function ActivityPage() {
     error = (err as Error).message;
   }
   return (
-    <main style={{ maxWidth: 680, margin: '48px auto', padding: 16 }}>
-      <h1>Активність</h1>
+    <main className="page">
+      <PageHeading
+        title="Активність"
+        description="Рух коштів, перекази та спільні рахунки в одній стрічці."
+      />
       <ActivityFeed initial={activity} initialError={error} />
     </main>
   );

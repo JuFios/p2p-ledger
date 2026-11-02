@@ -5,7 +5,16 @@ import { ApiError, clientFetch, isDefinitiveRejection } from '@/lib/http';
 import { isFinal, SplitBill, Transfer, Wallet } from '@/lib/types';
 import { useLiveSocket } from '@/lib/use-live-socket';
 import { useTransfer } from '@/lib/use-transfer';
-import { LiveStatus } from '@/components/live-status';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Field,
+  PageHeading,
+} from '@/components/ui/index';
+import { CopyId } from '@/components/ui/copy-id';
+import { dateLabel, money, statusLabels } from '@/lib/format';
 import { TransferProgress } from '@/components/transfer-progress';
 import { acceptShare } from '../actions';
 
@@ -39,13 +48,14 @@ export function BillDetails({
       if (request === revision.current) {
         setBill(nextBill);
         setWallets(nextWallets);
+        setError(null);
       }
     } catch (err) {
       if (request === revision.current) setError((err as Error).message);
     }
     await monitor.refresh();
   }
-  const status = useLiveSocket({
+  useLiveSocket({
     onConnect: reload,
     onWallet: () => void reload(),
     onActivity: () => void reload(),
@@ -124,82 +134,206 @@ export function BillDetails({
       setBusy(false);
     }
   }
+  const paidCount = bill.shares.filter(
+    (share) => share.status === 'PAID',
+  ).length;
+  const overdue =
+    !!bill.dueAt &&
+    new Date(bill.dueAt).getTime() < Date.now() &&
+    bill.status !== 'SETTLED';
   return (
-    <>
-      <h1>{bill.title}</h1>
-      <LiveStatus status={status} />
-      <p>
-        {bill.totalAmount} {bill.currency} · {bill.status} · Ініціатор:{' '}
-        {bill.creatorEmail}
-      </p>
-      {bill.dueAt && <p>Сплатити до: {bill.dueAt}</p>}
+    <div className="space-y-6">
+      <a href="/split-bills" className="text-link text-sm">
+        ← Спільні рахунки
+      </a>
+      <PageHeading
+        title={bill.title}
+        description={`Ініціатор: ${bill.creatorEmail}`}
+        action={
+          <Button variant="secondary" onClick={() => void reload()}>
+            Оновити рахунок
+          </Button>
+        }
+      />
       {(error || monitor.error) && (
-        <p role="alert" style={{ color: 'crimson' }}>
+        <Alert
+          action={
+            <Button variant="ghost" onClick={() => void reload()}>
+              Спробувати ще раз
+            </Button>
+          }
+        >
           {error || monitor.error}
-        </p>
+        </Alert>
       )}
-      <button onClick={() => void reload()}>Оновити рахунок</button>
-      <ul>
-        {bill.shares.map((share) => (
-          <li key={share.id}>
-            {share.participantEmail}: {share.amount} {bill.currency} ·{' '}
-            {share.status}
-          </li>
-        ))}
-      </ul>
-      {own?.status === 'PENDING' && (
-        <button disabled={busy} onClick={() => void accept()}>
-          Підтвердити свою частку
-        </button>
-      )}
-      {own &&
-        (own.status === 'ACCEPTED' ||
-          (!!attempt.current && !monitor.transfer)) && (
-          <form onSubmit={pay}>
-            <label>
-              Гаманець для оплати{' '}
-              <select
-                name="walletId"
-                disabled={busy || !!attempt.current}
-                required
-              >
-                {choices.map((wallet) => (
-                  <option key={wallet.id} value={wallet.id}>
-                    {wallet.currency} · {wallet.available}
-                  </option>
-                ))}
-              </select>
-            </label>{' '}
-            <button
-              disabled={
-                busy ||
-                (!attempt.current && !choices.length) ||
-                !!monitor.transfer
-              }
+      <div className="grid items-start gap-6 lg:grid-cols-3">
+        <div className="space-y-5 lg:col-span-2">
+          <Card>
+            <div className="flex flex-wrap justify-between gap-4">
+              <div>
+                <p className="muted">Загальна сума</p>
+                <p className="amount mt-2 text-3xl font-semibold">
+                  {money(bill.totalAmount)}{' '}
+                  <span className="text-base text-muted">{bill.currency}</span>
+                </p>
+              </div>
+              <Badge tone={bill.status === 'SETTLED' ? 'positive' : 'info'}>
+                {statusLabels[bill.status] ?? bill.status}
+              </Badge>
+            </div>
+            <p className="muted mb-3 mt-6">
+              Сплачено {paidCount} із {bill.shares.length} часток
+            </p>
+            <div
+              className="h-2 overflow-hidden rounded-full bg-line"
+              role="progressbar"
+              aria-label="Сплачені частки"
+              aria-valuenow={paidCount}
+              aria-valuemin={0}
+              aria-valuemax={bill.shares.length}
             >
-              {attempt.current
-                ? 'Повторити ту саму оплату'
-                : 'Сплатити свою частку'}
-            </button>
-            {!choices.length && (
-              <p>
-                <a href="/wallets">Відкрийте гаманець у {bill.currency}</a>.
+              <div
+                className="h-full rounded-full bg-positive"
+                style={{
+                  width: `${bill.shares.length ? (paidCount / bill.shares.length) * 100 : 0}%`,
+                }}
+              />
+            </div>
+            {bill.dueAt && (
+              <p
+                className={`mt-4 text-sm ${overdue ? 'text-negative' : 'text-muted'}`}
+              >
+                {overdue ? 'Прострочено · ' : 'Сплатити до: '}
+                {dateLabel(bill.dueAt)}
               </p>
             )}
-          </form>
-        )}
-      {monitor.transfer && <TransferProgress transfer={monitor.transfer} />}
-      {monitor.transfer && isFinal(monitor.transfer) && (
-        <button
-          onClick={() => {
-            attempt.current = null;
-            monitor.track(null);
-            void reload();
-          }}
-        >
-          Оновити результат оплати
-        </button>
-      )}
-    </>
+            <CopyId value={bill.id} />
+          </Card>
+          <Card>
+            <h2 className="mb-5">Учасники</h2>
+            <ul className="divide-y">
+              {bill.shares.map((share) => (
+                <li
+                  key={share.id}
+                  className="flex flex-wrap items-center gap-3 py-4 first:pt-0 last:pb-0"
+                >
+                  <span
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent/10 text-sm font-semibold text-accent"
+                    aria-hidden="true"
+                  >
+                    {share.participantEmail.slice(0, 2).toUpperCase()}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="break-all text-sm font-medium">
+                      {share.participantEmail}{' '}
+                      {share.id === own?.id && (
+                        <span className="whitespace-nowrap text-muted">
+                          (ви)
+                        </span>
+                      )}
+                    </p>
+                    <p className="amount mt-1 text-sm text-muted">
+                      {money(share.amount)} {bill.currency}
+                    </p>
+                  </div>
+                  <Badge
+                    tone={
+                      share.status === 'PAID'
+                        ? 'positive'
+                        : share.status === 'PAYING'
+                          ? 'caution'
+                          : 'neutral'
+                    }
+                  >
+                    {statusLabels[share.status] ?? share.status}
+                  </Badge>
+                  {share.id === own?.id && own.status === 'PENDING' && (
+                    <Button
+                      disabled={busy}
+                      loading={busy}
+                      onClick={() => void accept()}
+                    >
+                      Підтвердити свою частку
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </div>
+        <div className="space-y-5">
+          {own &&
+            (own.status === 'ACCEPTED' ||
+              (!!attempt.current && !monitor.transfer)) && (
+              <Card>
+                <h2>Ваша частка</h2>
+                <p className="amount mb-5 mt-3 text-2xl font-semibold">
+                  {money(own.amount)}{' '}
+                  <span className="text-sm text-muted">{bill.currency}</span>
+                </p>
+                <form onSubmit={pay}>
+                  <Field id="share-wallet" label="Гаманець для оплати">
+                    <select
+                      name="walletId"
+                      disabled={busy || !!attempt.current}
+                      required
+                    >
+                      {choices.map((wallet) => (
+                        <option key={wallet.id} value={wallet.id}>
+                          {wallet.currency} · {money(wallet.available)}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Button
+                    className="mt-5 w-full"
+                    loading={busy}
+                    disabled={
+                      busy ||
+                      (!attempt.current && !choices.length) ||
+                      !!monitor.transfer
+                    }
+                  >
+                    {attempt.current
+                      ? 'Повторити ту саму оплату'
+                      : 'Сплатити свою частку'}
+                  </Button>
+                  {!choices.length && (
+                    <p className="muted mt-3">
+                      <a className="text-link" href="/wallets">
+                        Відкрийте гаманець у {bill.currency}
+                      </a>
+                      .
+                    </p>
+                  )}
+                </form>
+              </Card>
+            )}
+          {monitor.transfer && <TransferProgress transfer={monitor.transfer} />}
+          {monitor.transfer && isFinal(monitor.transfer) && (
+            <Button
+              variant="secondary"
+              className="w-full"
+              onClick={() => {
+                attempt.current = null;
+                monitor.track(null);
+                void reload();
+              }}
+            >
+              Оновити результат оплати
+            </Button>
+          )}
+          {!own && (
+            <Card>
+              <h2>Усе під контролем</h2>
+              <p className="muted mt-3">
+                Кожен учасник підтверджує й оплачує свою частку. Статус рахунку
+                оновлюється автоматично.
+              </p>
+            </Card>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

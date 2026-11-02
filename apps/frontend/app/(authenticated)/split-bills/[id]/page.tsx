@@ -4,7 +4,7 @@ import { ApiError, bffFetch } from '@/lib/api';
 import { sessionClaims } from '@/lib/session';
 import { SplitBill, Wallet } from '@/lib/types';
 import { uuid } from '@/lib/validation';
-import { BillDetails } from './bill-details';
+import { BillDetails } from '@/app/split-bills/[id]/bill-details';
 
 export default async function BillPage({ params }: { params: { id: string } }) {
   if (!uuid(params.id)) notFound();
@@ -24,7 +24,7 @@ export default async function BillPage({ params }: { params: { id: string } }) {
   }
   const email = sessionClaims(cookies().get('accessToken')?.value)?.email ?? '';
   return (
-    <main style={{ maxWidth: 680, margin: '48px auto', padding: 16 }}>
+    <main className="page">
       <BillDetails
         initial={bill}
         initialWallets={wallets}

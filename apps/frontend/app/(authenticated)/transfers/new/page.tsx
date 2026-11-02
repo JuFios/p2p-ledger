@@ -1,6 +1,7 @@
+import { PageHeading } from '@/components/ui/index';
 import { bffFetch } from '@/lib/api';
 import { Wallet } from '@/lib/types';
-import { TransferForm } from './transfer-form';
+import { TransferForm } from '@/app/transfers/new/transfer-form';
 
 export default async function NewTransferPage() {
   let wallets: Wallet[] = [];
@@ -11,8 +12,11 @@ export default async function NewTransferPage() {
     error = (err as Error).message;
   }
   return (
-    <main style={{ maxWidth: 600, margin: '48px auto', padding: 16 }}>
-      <h1>Новий переказ</h1>
+    <main className="page">
+      <PageHeading
+        title="Новий переказ"
+        description="Надсилайте кошти за email і стежте за кожним кроком."
+      />
       <TransferForm initialWallets={wallets} initialError={error} />
     </main>
   );

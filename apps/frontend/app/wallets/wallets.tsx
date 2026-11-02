@@ -4,7 +4,16 @@ import { useRef, useState } from 'react';
 import { ApiError, clientFetch, isDefinitiveRejection } from '@/lib/http';
 import { CURRENCIES, Wallet } from '@/lib/types';
 import { useLiveSocket } from '@/lib/use-live-socket';
-import { LiveStatus } from '@/components/live-status';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  Field,
+} from '@/components/ui/index';
+import { CopyId } from '@/components/ui/copy-id';
+import { money } from '@/lib/format';
 
 export function Wallets({
   initial,
@@ -17,6 +26,7 @@ export function Wallets({
   const [error, setError] = useState(initialError);
   const [busy, setBusy] = useState(false);
   const revision = useRef(0);
+  const [changed, setChanged] = useState<string | null>(null);
   const attempt = useRef<{ key: string; path: string; body: string } | null>(
     null,
   );
@@ -32,10 +42,11 @@ export function Wallets({
       if (request === revision.current) setError((err as Error).message);
     }
   }
-  const status = useLiveSocket({
+  useLiveSocket({
     onConnect: reload,
     onWallet: (value) => {
       revision.current++;
+      setChanged(`${value.walletId}:${Date.now()}`);
       setWallets((old) =>
         old.map((w) => (w.id === value.walletId ? { ...w, ...value } : w)),
       );
@@ -69,43 +80,84 @@ export function Wallets({
     }
   }
   return (
-    <>
-      <LiveStatus status={status} />
+    <div className="space-y-6">
       {error && (
-        <p role="alert" style={{ color: 'crimson' }}>
+        <Alert
+          action={
+            <Button variant="ghost" onClick={() => void reload()}>
+              Спробувати ще раз
+            </Button>
+          }
+        >
           {error}
-        </p>
+        </Alert>
       )}
-      <button type="button" onClick={() => void reload()}>
-        Оновити
-      </button>
-      {!error && wallets.length === 0 && <p>Гаманців поки немає.</p>}
-      <ul>
+      {!error && wallets.length === 0 && (
+        <EmptyState
+          title="Гаманців поки немає"
+          description="Відкрийте гаманець у потрібній валюті, щоб почати."
+          action={
+            <a className="button-primary" href="#open-wallet">
+              Відкрити перший гаманець
+            </a>
+          }
+        />
+      )}
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {wallets.map((wallet) => (
-          <li key={wallet.id} style={{ margin: '20px 0' }}>
-            <strong>
-              {wallet.currency}: {wallet.balance}
-            </strong>
-            <p>
-              Доступно: {wallet.available} · У резерві: {wallet.held}{' '}
-              {wallet.frozen && '· Заморожено'}
+          <Card key={wallet.id} className="flex min-w-0 flex-col">
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-lg font-medium text-accent">
+                {
+                  ({ USD: '$', EUR: '€', UAH: '₴' } as Record<string, string>)[
+                    wallet.currency
+                  ]
+                }
+              </span>
+              <Badge tone={wallet.frozen ? 'caution' : 'neutral'}>
+                {wallet.frozen ? 'Заморожено' : wallet.currency}
+              </Badge>
+            </div>
+            <p className="muted mb-1 mt-6">Доступно</p>
+            <div
+              key={changed?.startsWith(wallet.id) ? changed : wallet.id}
+              className={`-mx-2 rounded-lg px-2 py-1 ${changed?.startsWith(wallet.id) ? 'balance-flash' : ''}`}
+            >
+              <p className="amount break-words text-3xl font-semibold">
+                {money(wallet.available)}{' '}
+                <span className="text-sm font-medium text-muted">
+                  {wallet.currency}
+                </span>
+              </p>
+            </div>
+            <p className="muted mt-2">
+              У резерві: <span className="amount">{money(wallet.held)}</span>
             </p>
-            <small>ID: {wallet.id}</small>
+            <div className="mt-2">
+              <CopyId value={wallet.id} />
+            </div>
             <form
+              className="mt-5 border-t pt-5"
               onSubmit={(event) => {
                 event.preventDefault();
                 const data = new FormData(event.currentTarget);
-                void mutate(`/wallets/${wallet.id}/deposit`, {
-                  amount: Number(data.get('amount')),
-                });
+                const operation = (event.nativeEvent as SubmitEvent)
+                  .submitter as HTMLButtonElement | null;
+                void mutate(
+                  `/wallets/${wallet.id}/${operation?.value === 'withdraw' ? 'withdraw' : 'deposit'}`,
+                  { amount: Number(data.get('amount')) },
+                );
               }}
             >
               <fieldset
                 disabled={busy || !!attempt.current || wallet.frozen}
-                style={{ border: 0, padding: '8px 0' }}
+                className="space-y-3 border-0 p-0"
               >
-                <label>
-                  Сума поповнення{' '}
+                <Field
+                  id={`amount-${wallet.id}`}
+                  label="Сума операції"
+                  help="Від 0.01 до 1 000 000, до двох знаків після крапки."
+                >
                   <input
                     name="amount"
                     type="number"
@@ -113,42 +165,83 @@ export function Wallets({
                     max="1000000"
                     step="0.01"
                     required
+                    placeholder="0.00"
                   />
-                </label>{' '}
-                <button>Поповнити</button>
+                </Field>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="submit"
+                    name="operation"
+                    value="deposit"
+                    loading={busy}
+                  >
+                    Поповнити
+                  </Button>
+                  <Button
+                    type="submit"
+                    name="operation"
+                    value="withdraw"
+                    variant="secondary"
+                    disabled={busy}
+                  >
+                    Зняти
+                  </Button>
+                </div>
               </fieldset>
             </form>
-          </li>
+          </Card>
         ))}
-      </ul>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void mutate('/wallets', {
-            currency: new FormData(event.currentTarget).get('currency'),
-          });
-        }}
-      >
-        <fieldset
-          disabled={busy || !!attempt.current}
-          style={{ border: 0, padding: 0 }}
+      </div>
+      <Card id="open-wallet">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2>Ще одна валюта?</h2>
+            <p className="muted mt-1">
+              Один гаманець на кожну валюту: USD, EUR та UAH.
+            </p>
+          </div>
+          <Button variant="ghost" onClick={() => void reload()}>
+            Оновити
+          </Button>
+        </div>
+        <form
+          className="mt-5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void mutate('/wallets', {
+              currency: new FormData(event.currentTarget).get('currency'),
+            });
+          }}
         >
-          <label>
-            Валюта{' '}
-            <select name="currency">
-              {CURRENCIES.map((c) => (
-                <option key={c}>{c}</option>
-              ))}
-            </select>
-          </label>{' '}
-          <button>Відкрити гаманець</button>
-        </fieldset>
-      </form>
+          <fieldset
+            disabled={busy || !!attempt.current}
+            className="flex flex-col items-stretch gap-3 border-0 p-0 sm:flex-row sm:items-end"
+          >
+            <div className="sm:w-44">
+              <Field id="open-currency" label="Валюта">
+                <select name="currency">
+                  {CURRENCIES.map((c) => (
+                    <option key={c}>{c}</option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <Button loading={busy}>Відкрити гаманець</Button>
+          </fieldset>
+        </form>
+      </Card>
       {attempt.current && !busy && (
-        <button onClick={() => void mutate('', {})}>
-          Повторити попередній запит
-        </button>
+        <Alert
+          tone="caution"
+          action={
+            <Button variant="secondary" onClick={() => void mutate('', {})}>
+              Повторити попередній запит
+            </Button>
+          }
+        >
+          Результат операції ще невідомий. Повторіть збережений запит.
+        </Alert>
       )}
-    </>
+    </div>
   );
 }
