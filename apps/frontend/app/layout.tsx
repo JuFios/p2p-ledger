@@ -1,3 +1,6 @@
+import '@fontsource-variable/inter';
+import './globals.css';
+
 export const metadata = {
   title: 'P2P Ledger',
 };
@@ -9,7 +12,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="uk">
-      <body style={{ fontFamily: 'system-ui, sans-serif', margin: 0 }}>
+      <body>
         <nav aria-label="Головна навігація" style={{ padding: 16, display: 'flex', flexWrap: 'wrap', gap: 16 }}>
           <a href="/wallets">Гаманці</a>
           <a href="/transfers/new">Переказ</a>

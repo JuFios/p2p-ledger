@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --canvas: 248 250 252;
+  --surface: 255 255 255;
+  --ink: 15 23 42;
+  --muted: 71 85 105;
+  --line: 226 232 240;
+  --accent: 79 70 229;
+  --on-accent: 255 255 255;
+  --positive: 4 120 87;
+  --caution: 180 83 9;
+  --negative: 225 29 72;
+  --info: 3 105 161;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --canvas: 2 6 23;
+    --surface: 15 23 42;
+    --ink: 241 245 249;
+    --muted: 148 163 184;
+    --line: 30 41 59;
+    --accent: 165 180 252;
+    --on-accent: 15 23 42;
+    --positive: 52 211 153;
+    --caution: 251 191 36;
+    --negative: 251 113 133;
+    --info: 56 189 248;
+  }
+}
+@layer base {
+  body { @apply m-0 bg-canvas font-sans text-ink antialiased; }
+  * { @apply border-line; }
+  :focus-visible { @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-canvas; }
+  h1 { @apply text-3xl font-semibold tracking-tight; }
+  h2 { @apply text-xl font-semibold tracking-tight; }
+  h3 { @apply text-base font-semibold; }
+  input, select, textarea { @apply min-w-0; }
+  button, a, input, select { @apply transition duration-150; }
+  button:disabled { @apply cursor-not-allowed opacity-50; }
+  summary { @apply cursor-pointer; }
+  th { @apply px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted; }
+  td { @apply border-t px-4 py-4 text-sm; }
+}
+@layer components {
+  .page { @apply mx-auto w-full max-w-5xl px-4 py-8 md:px-8 md:py-12; }
+  .page-heading { @apply mb-8 flex flex-wrap items-end justify-between gap-4; }
+  .surface { @apply rounded-xl border bg-surface p-5 shadow-sm sm:p-6; }
+  .control { @apply min-h-11 w-full rounded-lg border bg-surface px-3 py-2 text-sm text-ink placeholder:text-muted; }
+  .label { @apply mb-2 block text-sm font-medium; }
+  .muted { @apply text-sm leading-relaxed text-muted; }
+  .button { @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50; }
+  .button-primary { @apply button bg-accent text-on-accent hover:opacity-90; }
+  .button-secondary { @apply button border bg-surface text-ink hover:bg-canvas; }
+  .button-ghost { @apply button text-muted hover:bg-canvas hover:text-ink; }
+  .button-danger { @apply button bg-negative text-canvas hover:opacity-90; }
+  .text-link { @apply font-medium text-accent underline-offset-4 hover:underline; }
+  .amount { @apply tabular-nums tracking-tight; }
+}
+@keyframes balance-flash { from { background-color: rgb(var(--positive) / .14); } to { background-color: transparent; } }
+.balance-flash { animation: balance-flash 1s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
