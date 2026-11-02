@@ -7,6 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { User } from './entities/user.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -48,10 +49,10 @@ export class AuthService {
   }
 
   async refresh(refreshToken: string): Promise<TokenPair> {
-    let payload: { sub: string };
+    let payload: { sub: string; sid?: string };
     try {
       payload = this.jwt.verify(refreshToken, {
-        secret: process.env.JWT_REFRESH_SECRET ?? 'change-me-refresh',
+        secret: process.env.JWT_REFRESH_SECRET,
       });
     } catch {
       throw new UnauthorizedException('Невалідний refresh token');
@@ -60,25 +61,76 @@ export class AuthService {
     if (!user || !user.refreshTokenHash) {
       throw new UnauthorizedException('Refresh token відкликано');
     }
-    const matches = await bcrypt.compare(refreshToken, user.refreshTokenHash);
+    const actual = Buffer.from(
+      createHash('sha256').update(refreshToken).digest('hex'),
+    );
+    const expected = Buffer.from(user.refreshTokenHash);
+    const matches =
+      actual.length === expected.length && timingSafeEqual(actual, expected);
     if (!matches) {
       throw new UnauthorizedException('Refresh token відкликано');
     }
-    return this.issueTokens(user);
+    const sessionId = payload.sid ?? actual.toString();
+    if (sessionId !== user.refreshSessionId)
+      throw new UnauthorizedException('Refresh token відкликано');
+    return this.issueTokens(user, user.refreshTokenHash);
   }
 
-  private async issueTokens(user: User): Promise<TokenPair> {
+  private async issueTokens(
+    user: User,
+    expectedRefreshHash?: string,
+  ): Promise<TokenPair> {
     const payload = { sub: user.id, email: user.email, role: user.role };
+    const sessionId =
+      expectedRefreshHash === undefined ? randomUUID() : user.refreshSessionId!;
     const accessToken = this.jwt.sign(payload, {
-      secret: process.env.JWT_ACCESS_SECRET ?? 'change-me-access',
+      secret: process.env.JWT_ACCESS_SECRET!,
       expiresIn: process.env.JWT_ACCESS_TTL ?? '15m',
     });
-    const refreshToken = this.jwt.sign(payload, {
-      secret: process.env.JWT_REFRESH_SECRET ?? 'change-me-refresh',
-      expiresIn: process.env.JWT_REFRESH_TTL ?? '7d',
-    });
-    user.refreshTokenHash = await bcrypt.hash(refreshToken, 10);
-    await this.users.save(user);
+    const refreshToken = this.jwt.sign(
+      { ...payload, sid: sessionId },
+      {
+        secret: process.env.JWT_REFRESH_SECRET,
+        expiresIn: process.env.JWT_REFRESH_TTL ?? '7d',
+        jwtid: randomUUID(),
+      },
+    );
+    user.refreshTokenHash = createHash('sha256')
+      .update(refreshToken)
+      .digest('hex');
+    if (expectedRefreshHash !== undefined) {
+      const result = await this.users.update(
+        {
+          id: user.id,
+          refreshTokenHash: expectedRefreshHash,
+          refreshSessionId: sessionId,
+        },
+        { refreshTokenHash: user.refreshTokenHash },
+      );
+      if (result.affected !== 1)
+        throw new UnauthorizedException('Refresh token відкликано');
+    } else {
+      user.refreshSessionId = sessionId;
+      await this.users.save(user);
+    }
     return { accessToken, refreshToken };
+  }
+
+  async logout(refreshToken: string): Promise<void> {
+    let payload: { sub: string; sid?: string };
+    try {
+      payload = this.jwt.verify(refreshToken, {
+        secret: process.env.JWT_REFRESH_SECRET,
+      });
+    } catch {
+      return;
+    }
+    // Токени одного входу мають спільний sid навіть після ротації.
+    const sessionId =
+      payload.sid ?? createHash('sha256').update(refreshToken).digest('hex');
+    await this.users.update(
+      { id: payload.sub, refreshSessionId: sessionId },
+      { refreshTokenHash: null, refreshSessionId: null },
+    );
   }
 }

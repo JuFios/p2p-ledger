@@ -14,6 +14,9 @@ export class User {
   @Column({ type: 'varchar', nullable: true })
   refreshTokenHash: string | null;
 
+  @Column({ type: 'varchar', nullable: true })
+  refreshSessionId: string | null;
+
   @Column({ default: 'user' })
   role: 'user' | 'admin';
 }

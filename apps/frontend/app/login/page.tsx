@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Alert, Brand, Card } from '@/components/ui/index';
 import { useRouter } from 'next/navigation';
 
 export default function LoginPage() {
@@ -26,31 +27,55 @@ export default function LoginPage() {
   }
 
   return (
-    <main style={{ maxWidth: 360, margin: '80px auto' }}>
-      <h1>Вхід</h1>
-      <form onSubmit={onSubmit}>
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-        <br />
-        <input
-          type="password"
-          placeholder="Пароль"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
-        <br />
-        {error && <p style={{ color: 'crimson' }}>{error}</p>}
-        <button type="submit">Увійти</button>
-      </form>
-      <p>
-        Немає акаунта? <a href="/register">Зареєструватись</a>
-      </p>
+    <main className="flex min-h-screen items-center justify-center px-4 py-12">
+      <div className="w-full max-w-sm">
+        <div className="mb-8 flex justify-center">
+          <Brand />
+        </div>
+        <Card>
+          <h1 className="text-2xl">Вхід</h1>
+          <p className="muted mb-7 mt-2">
+            Раді бачити вас знову. Увійдіть до своїх гаманців.
+          </p>
+          <form onSubmit={onSubmit} className="grid gap-5">
+            <label className="block text-sm font-medium">
+              Email
+              <input
+                className="control mt-2"
+                type="email"
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </label>
+            <label className="block text-sm font-medium">
+              Пароль
+              <input
+                className="control mt-2"
+                type="password"
+                placeholder="Пароль"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </label>
+            {error && <Alert>{error}</Alert>}
+            <button className="button-primary w-full" type="submit">
+              Увійти
+            </button>
+          </form>
+        </Card>
+        <p className="muted mt-6 text-center">
+          Немає акаунта?{' '}
+          <a className="text-link" href="/register">
+            Зареєструватись
+          </a>
+        </p>
+        <p className="mt-8 text-center text-xs text-muted">
+          Ваші гроші. Зрозумілий рух коштів.
+        </p>
+      </div>
     </main>
   );
 }

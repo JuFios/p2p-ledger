@@ -481,3 +481,18 @@ it('serves health, metrics and a Swagger schema with mutation fields', async () 
     response.body.components.schemas.CreateSplitBillDto.properties.participants,
   ).toBeDefined();
 });
+
+
+it('forwards logout without an access token and preserves 204', async () => {
+  ledger.status = 204;
+  await request(app.getHttpServer()).post('/auth/logout')
+    .send({ refreshToken: 'current-refresh' }).expect(204);
+  expect(ledger.calls[0]).toMatchObject({
+    url: '/auth/logout', body: { refreshToken: 'current-refresh' },
+  });
+});
+it('validates the logout refresh token before calling ledger', async () => {
+  await request(app.getHttpServer()).post('/auth/logout')
+    .send({ refreshToken: 123 }).expect(400);
+  expect(ledger.calls).toHaveLength(0);
+});

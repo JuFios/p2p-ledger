@@ -52,9 +52,11 @@ export function useLiveSocket(handlers: LiveHandlers) {
           setStatus('online');
           callbacks.current.onConnect?.();
         });
-        socket.on('disconnect', () =>
-          setStatus(navigator.onLine ? 'reconnecting' : 'offline'),
-        );
+        socket.on('disconnect', (reason) => {
+          setStatus(navigator.onLine ? 'reconnecting' : 'offline');
+          if (reason === 'io server disconnect' && navigator.onLine)
+            schedule(() => socket?.connect());
+        });
         socket.on('connect_error', () => {
           setStatus(navigator.onLine ? 'reconnecting' : 'offline');
           if (!socket?.active) schedule(() => socket?.connect());

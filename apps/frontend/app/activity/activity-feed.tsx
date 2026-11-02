@@ -4,7 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientFetch } from '@/lib/http';
 import { ACTIVITY_TYPES, Activity } from '@/lib/types';
 import { useLiveSocket } from '@/lib/use-live-socket';
-import { LiveStatus } from '@/components/live-status';
+import {
+  Alert,
+  Button,
+  Card,
+  EmptyState,
+  Skeleton,
+} from '@/components/ui/index';
+import { dayLabel, failureLabel, money } from '@/lib/format';
 
 const labels: Record<string, string> = {
   DEPOSIT: 'Поповнення',
@@ -47,66 +54,183 @@ export function ActivityFeed({
   useEffect(() => {
     void reload();
   }, [reload]);
-  const status = useLiveSocket({
+  useLiveSocket({
     onConnect: reload,
     onActivity: () => void reload(),
   });
+  const groups = new Map<string, Activity[]>();
+  for (const item of items) {
+    const day = dayLabel(item.createdAt);
+    groups.set(day, [...(groups.get(day) ?? []), item]);
+  }
   return (
-    <>
-      <LiveStatus status={status} />
-      <label>
-        Тип операції{' '}
-        <select
-          value={type}
-          onChange={(e) => {
-            setType(e.target.value);
-            setItems([]);
-          }}
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div
+          className="flex flex-wrap gap-2"
+          role="group"
+          aria-label="Тип операції"
         >
-          <option value="">Усі операції</option>
-          {ACTIVITY_TYPES.map((value) => (
-            <option key={value} value={value}>
-              {labels[value]}
-            </option>
+          {['', ...ACTIVITY_TYPES].map((value) => (
+            <button
+              type="button"
+              key={value}
+              aria-pressed={type === value}
+              className={`min-h-10 rounded-full border px-3 py-2 text-xs font-medium ${type === value ? 'border-accent bg-accent/10 text-accent' : 'bg-surface text-muted hover:text-ink'}`}
+              onClick={() => {
+                setType(value);
+                setItems([]);
+              }}
+            >
+              {value ? labels[value] : 'Усі операції'}
+            </button>
           ))}
-        </select>
-      </label>{' '}
-      <button onClick={() => void reload()}>Оновити</button>
-      {loading && <p role="status">Завантаження активності…</p>}
+        </div>
+        <Button variant="ghost" onClick={() => void reload()}>
+          Оновити
+        </Button>
+      </div>
       {error && (
-        <p role="alert" style={{ color: 'crimson' }}>
+        <Alert
+          action={
+            <Button variant="ghost" onClick={() => void reload()}>
+              Спробувати ще раз
+            </Button>
+          }
+        >
           {error}
-        </p>
+        </Alert>
       )}
-      {!error && !loading && items.length === 0 && <p>Операцій поки немає.</p>}
-      <ul>
-        {items.map((item) => (
-          <li key={item.id} style={{ margin: '20px 0' }}>
-            <strong>{labels[item.type] ?? item.type}</strong> ·{' '}
-            <time>{item.createdAt}</time>
-            {typeof item.payload.amount === 'string' && (
-              <p>
-                {item.payload.amount} {String(item.payload.currency ?? '')}
-              </p>
-            )}
-            {typeof item.payload.title === 'string' && (
-              <p>{item.payload.title}</p>
-            )}
-            {typeof item.payload.failureReason === 'string' && (
-              <p>{item.payload.failureReason}</p>
-            )}
-            {typeof item.payload.billId === 'string' && (
-              <p>
-                <a
-                  href={`/split-bills/${encodeURIComponent(item.payload.billId)}`}
+      {loading && !items.length && (
+        <Card role="status" aria-label="Завантаження активності…">
+          <span className="sr-only">Завантаження активності…</span>
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex items-center gap-4 py-5">
+              <Skeleton className="h-11 w-11 rounded-full" />
+              <div className="flex-1 space-y-3">
+                <Skeleton className="h-4 w-1/2" />
+                <Skeleton className="h-3 w-1/3" />
+              </div>
+              <Skeleton className="h-6 w-20" />
+            </div>
+          ))}
+        </Card>
+      )}
+      {!error && !loading && !items.length && (
+        <EmptyState
+          title="Операцій поки немає"
+          description={
+            type
+              ? 'Спробуйте інший фільтр або виконайте першу операцію цього типу.'
+              : 'Тут з’являться поповнення, перекази та запрошення до спільних рахунків.'
+          }
+          action={
+            type ? (
+              <Button variant="secondary" onClick={() => setType('')}>
+                Показати всі операції
+              </Button>
+            ) : (
+              <a className="button-primary" href="/transfers/new">
+                Зробити переказ
+              </a>
+            )
+          }
+        />
+      )}
+      {Array.from(groups, ([day, entries]) => (
+        <section key={day}>
+          <h2 className="mb-3 text-sm text-muted">{day}</h2>
+          <Card className="divide-y py-0 sm:py-0">
+            {entries.map((item) => {
+              const incoming =
+                item.type === 'DEPOSIT' || item.type === 'TRANSFER_RECEIVED';
+              const outgoing =
+                item.type === 'WITHDRAWAL' || item.type === 'TRANSFER_SENT';
+              const failed = item.type === 'TRANSFER_FAILED';
+              return (
+                <div
+                  key={item.id}
+                  className="flex items-start gap-3 py-5 sm:gap-4"
                 >
-                  Відкрити рахунок
-                </a>
-              </p>
-            )}
-          </li>
-        ))}
-      </ul>
-    </>
+                  <span
+                    className={`mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${incoming ? 'bg-positive/10 text-positive' : failed ? 'bg-negative/10 text-negative' : 'bg-accent/10 text-accent'}`}
+                  >
+                    <svg
+                      aria-hidden="true"
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      {failed ? (
+                        <path d="m7 7 10 10M7 17 17 7" />
+                      ) : incoming ? (
+                        <path d="M12 4v16m-6-6 6 6 6-6" />
+                      ) : outgoing ? (
+                        <path d="M12 20V4m-6 6 6-6 6 6" />
+                      ) : (
+                        <>
+                          <rect x="4" y="3" width="16" height="18" rx="2" />
+                          <path d="M8 8h8M8 12h8M8 16h4" />
+                        </>
+                      )}
+                    </svg>
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                      <h3 className="text-sm">
+                        {labels[item.type] ?? item.type}
+                      </h3>
+                      {typeof item.payload.amount === 'string' && (
+                        <p
+                          className={`amount whitespace-nowrap text-sm font-semibold ${incoming ? 'text-positive' : failed ? 'text-negative' : ''}`}
+                        >
+                          {incoming ? '+' : outgoing ? '−' : ''}
+                          {money(item.payload.amount)}{' '}
+                          <span className="text-xs font-normal text-muted">
+                            {String(item.payload.currency ?? '')}
+                          </span>
+                        </p>
+                      )}
+                    </div>
+                    <time
+                      className="mt-1 block text-xs text-muted"
+                      dateTime={item.createdAt}
+                    >
+                      {new Date(item.createdAt).toLocaleTimeString('uk-UA', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </time>
+                    {typeof item.payload.title === 'string' && (
+                      <p className="muted mt-2 break-words">
+                        {item.payload.title}
+                      </p>
+                    )}
+                    {typeof item.payload.failureReason === 'string' && (
+                      <p className="mt-2 text-sm text-negative">
+                        {failureLabel(item.payload.failureReason)}
+                      </p>
+                    )}
+                    {typeof item.payload.billId === 'string' && (
+                      <a
+                        className="text-link mt-2 inline-block text-sm"
+                        href={`/split-bills/${encodeURIComponent(item.payload.billId)}`}
+                      >
+                        Відкрити рахунок →
+                      </a>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </Card>
+        </section>
+      ))}
+    </div>
   );
 }

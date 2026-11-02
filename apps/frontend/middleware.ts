@@ -31,10 +31,18 @@ function refresh(refreshToken: string) {
     };
   })();
   refreshing.set(refreshToken, request);
-  // Паралельні запити одного процесу не обертають refresh token одночасно.
-  void request
-    .finally(() => refreshing.delete(refreshToken))
-    .catch(() => undefined);
+  // Запізнілі запити зі старою cookie отримують ту саму ротацію.
+  void request.then(
+    ({ tokens }) => {
+      if (!tokens) {
+        refreshing.delete(refreshToken);
+        return;
+      }
+      const timer = setTimeout(() => refreshing.delete(refreshToken), 30000);
+      (timer as unknown as { unref?: () => void }).unref?.();
+    },
+    () => refreshing.delete(refreshToken),
+  );
   return request;
 }
 

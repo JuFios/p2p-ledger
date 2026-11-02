@@ -11,10 +11,11 @@ import { AdminModule } from './admin/admin.module';
 import { OutboxModule } from './outbox/outbox.module';
 import { ObservabilityModule } from './observability/observability.module';
 import { entities, migrations } from './data-source';
+import { validate } from './config/env.validation';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, validate }),
     ObservabilityModule,
     TypeOrmModule.forRoot({
       type: 'postgres',

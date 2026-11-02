@@ -1,4 +1,5 @@
 'use client';
+import { Badge } from './ui/index';
 
 export function LiveStatus({
   status,
@@ -11,11 +12,12 @@ export function LiveStatus({
     reconnecting: 'Перепідключення…',
   };
   return (
-    <p
-      role="status"
-      style={{ color: status === 'online' ? 'green' : '#845100' }}
-    >
-      ● {labels[status]}
-    </p>
+    <span role="status" className="inline-flex shrink-0">
+      <Badge tone={status === 'online' ? 'positive' : 'caution'}>
+        <span className="max-w-20 truncate sm:max-w-none">
+          {labels[status]}
+        </span>
+      </Badge>
+    </span>
   );
 }
