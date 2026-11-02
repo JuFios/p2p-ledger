@@ -46,6 +46,16 @@ export interface Activity {
 
 const baseUrl = process.env.BFF_URL ?? 'http://localhost:3004';
 
+class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly retryable: boolean,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+  }
+}
+
 export async function api<T>(
   path: string,
   token?: string,
@@ -53,21 +63,35 @@ export async function api<T>(
   key?: string,
   statuses = body === undefined ? [200] : [200, 201],
 ): Promise<{ status: number; body: T }> {
-  const response = await fetch(`${baseUrl}${path}`, {
-    method: body === undefined ? 'GET' : 'POST',
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-      ...(key ? { 'Idempotency-Key': key } : {}),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(10000),
-  });
-  const result = await response.json();
-  assert(
-    statuses.includes(response.status),
-    `${path}: HTTP ${response.status}, expected ${statuses.join('/')}`,
-  );
+  const method = body === undefined ? 'GET' : 'POST';
+  let response: Response;
+  let text: string;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      method,
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...(key ? { 'Idempotency-Key': key } : {}),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(10000),
+    });
+    text = await response.text();
+  } catch (cause) {
+    throw new ApiError(
+      `${path}: ${method} transport failed`,
+      method === 'GET',
+      { cause },
+    );
+  }
+  if (!statuses.includes(response.status)) {
+    throw new ApiError(
+      `${path}: HTTP ${response.status}, expected ${statuses.join('/')}`,
+      method === 'GET' && response.status >= 500 && response.status < 600,
+    );
+  }
+  const result = text.trim() ? JSON.parse(text) : undefined;
   return { status: response.status, body: result as T };
 }
 
@@ -87,12 +111,15 @@ export async function user(): Promise<User> {
 }
 
 export async function admin(): Promise<string> {
+  const email = process.env.ADMIN_EMAIL;
+  const password = process.env.ADMIN_PASSWORD;
+  assert(email && password, 'ADMIN_EMAIL and ADMIN_PASSWORD are required');
   const result = await api<{ accessToken: string }>(
     '/auth/login',
     undefined,
     {
-      email: process.env.ADMIN_EMAIL ?? 'admin@example.com',
-      password: process.env.ADMIN_PASSWORD ?? 'change-me-admin',
+      email,
+      password,
     },
     undefined,
     [201],
@@ -156,15 +183,28 @@ export async function eventually<T>(
   accept: (value: T) => boolean,
   label: string,
   timeout = 20000,
+  interval = 150,
 ): Promise<T> {
   const deadline = Date.now() + timeout;
-  let last: T;
-  do {
-    last = await read();
+  let last: T | undefined;
+  let lastError: ApiError | undefined;
+  while (Date.now() < deadline) {
+    try {
+      last = await read();
+      lastError = undefined;
+    } catch (error) {
+      if (!(error instanceof ApiError) || !error.retryable) throw error;
+      lastError = error;
+      await delay(Math.min(interval, Math.max(0, deadline - Date.now())));
+      continue;
+    }
     if (accept(last)) return last;
-    await delay(150);
-  } while (Date.now() < deadline);
-  throw new Error(`${label}: timeout; last=${JSON.stringify(last!)}`);
+    await delay(Math.min(interval, Math.max(0, deadline - Date.now())));
+  }
+  throw new Error(
+    `${label}: timeout; last=${lastError?.message ?? JSON.stringify(last)}`,
+    { cause: lastError },
+  );
 }
 
 export function terminal(owner: User, id: string): Promise<Transfer> {
@@ -173,6 +213,7 @@ export function terminal(owner: User, id: string): Promise<Transfer> {
     (t) => t.status === 'COMPLETED' || t.status === 'FAILED',
     `transfer ${id}`,
     90000,
+    500,
   );
 }
 
