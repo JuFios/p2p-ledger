@@ -7,6 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import { createHash, randomUUID, timingSafeEqual } from 'crypto';
 import { User } from './entities/user.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -60,7 +61,12 @@ export class AuthService {
     if (!user || !user.refreshTokenHash) {
       throw new UnauthorizedException('Refresh token відкликано');
     }
-    const matches = await bcrypt.compare(refreshToken, user.refreshTokenHash);
+    const actual = Buffer.from(
+      createHash('sha256').update(refreshToken).digest('hex'),
+    );
+    const expected = Buffer.from(user.refreshTokenHash);
+    const matches =
+      actual.length === expected.length && timingSafeEqual(actual, expected);
     if (!matches) {
       throw new UnauthorizedException('Refresh token відкликано');
     }
@@ -76,8 +82,9 @@ export class AuthService {
     const refreshToken = this.jwt.sign(payload, {
       secret: process.env.JWT_REFRESH_SECRET ?? 'change-me-refresh',
       expiresIn: process.env.JWT_REFRESH_TTL ?? '7d',
+      jwtid: randomUUID(),
     });
-    user.refreshTokenHash = await bcrypt.hash(refreshToken, 10);
+    user.refreshTokenHash = createHash('sha256').update(refreshToken).digest('hex');
     await this.users.save(user);
     return { accessToken, refreshToken };
   }
