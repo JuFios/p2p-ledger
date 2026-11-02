@@ -1,0 +1,42 @@
+x-admin-env: &admin-env
+  ADMIN_EMAIL: admin@example.com
+  ADMIN_PASSWORD: change-me-admin
+
+services:
+  ledger-db:
+    ports: !reset []
+  payments-db:
+    ports: !reset []
+  notifications-db:
+    ports: !reset []
+  redis:
+    ports: !reset []
+  jaeger:
+    ports: !reset []
+  ledger-service:
+    ports: !reset []
+    environment:
+      <<: *admin-env
+      LOGIN_RATE_LIMIT: 1000
+  payments-service:
+    ports: !reset []
+    environment:
+      TRANSFER_RATE_LIMIT: 1000
+      TRANSFER_MAX_AMOUNT: 1000000
+      FX_RATES_JSON: '{"USD":1,"EUR":0.92,"UAH":41.5}'
+  notifications-service:
+    ports: !reset []
+  bff:
+    ports: !reset []
+  frontend:
+    ports: !reset []
+  system-tests:
+    profiles: [test]
+    build: ./tests/system
+    environment:
+      <<: *admin-env
+      BFF_URL: http://bff:3004
+      WS_PUBLIC_URL: http://notifications-service:3003
+    depends_on:
+      bff:
+        condition: service_healthy

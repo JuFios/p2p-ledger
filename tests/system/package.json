@@ -1,0 +1,35 @@
+{
+  "name": "p2p-ledger-system-tests",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": "20.x"
+  },
+  "scripts": {
+    "lint": "eslint \"**/*.ts\" --max-warnings=0",
+    "test": "jest --runInBand",
+    "test:load": "ts-node load/double-spend.ts"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.11.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.56.0",
+    "jest": "^29.7.0",
+    "socket.io-client": "^4.8.4",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.3.3"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "<rootDir>/*.spec.ts"
+    ],
+    "testTimeout": 180000,
+    "transform": {
+      "^.+\\.ts$": "ts-jest"
+    }
+  }
+}
