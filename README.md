@@ -150,16 +150,19 @@ Nest-сервіси мають `/health` і `/metrics`. Адмін-логін у
 Секрети `change-me-*` та паролі БД — публічні dev-значення. Для іншого
 середовища задайте власні через env/Compose override, узгодивши
 `JWT_ACCESS_SECRET` у всіх Nest-сервісах і `INTERNAL_API_TOKEN` у ledger/payments.
-Ledger зберігає стартові fallback JWT-секрети й не валідує env на старті;
-payments, notifications і BFF валідують конфігурацію. Плейсхолдери не
-відхиляються валідатором: локальний приклад має запускатися без налаштувань.
+Усі Nest-сервіси валідують конфігурацію на старті. У ledger немає запасних
+JWT-секретів; обов’язкові значення потрібні в усіх середовищах. Лише при
+`NODE_ENV=production` ledger додатково відхиляє `change-me-*`, JWT/internal
+секрети коротші за 32 символи й пароль адміністратора коротший за 12.
+Штатний Compose не задає `NODE_ENV=production`, тому перевірка сили секретів
+у демонстраційному запуску неактивна; `.env.example` працює без змін.
 
 Схема БД ledger створюється міграціями (`apps/ledger-service/src/migrations`),
 вони застосовуються автоматично на старті сервісу; `synchronize` вимкнено.
 Міграції всіх трьох БД застосовуються на старті, `synchronize: false`.
 Міграції даних зі стартової схеми (баланс полем у `wallets`) немає. Якщо
 залишився старий dev-том, його можна перестворити командою
-`docker compose down -v`: **вона видалить усі три БД поточного Compose-проєкту**.
+`docker compose down -v`: **вона видалить усі три БД і дані Redis поточного Compose-проєкту**.
 Для нової інсталяції ця команда не потрібна; важливі дані спершу збережіть.
 
 Swagger ledger-service — http://localhost:3001/docs. Адмін створюється на
@@ -424,9 +427,13 @@ Notifications зберігає останню позицію у `push_update_pos
 `OTEL_*` у середовищі й перевіряють реальний OTLP-експорт з іменем сервісу та
 адресою колектора, заданими лише в `.env`.
 
-JWT перевіряється при WS-handshake. Сплив JWT сам собою не від'єднує вже
-автентифіковану WS-сесію; політика строку активної сесії потребує окремого
-рішення. Нове підключення завжди проходить перевірку токена.
+JWT перевіряється при WS-handshake. Gateway зберігає `exp` і від’єднує
+сокет у момент спливу токена; таймер очищається при disconnect і не утримує
+процес. Клієнт через 3 секунди повторює підключення після серверного
+disconnect: auth-callback бере свіжий access через middleware, а `connect`
+повторно читає актуальний стан через REST. Новий handshake з простроченим
+токеном відхиляється. Політику перевіряють таймерні unit, реальний Socket.IO
+e2e та React DOM тест нового handshake і повторного REST callback.
 
 
 ## Спостережуваність
@@ -653,7 +660,7 @@ JSON-підсумок друкує виміряні кількості й фак
 
 Локальний прогін 2026-11-02: Docker Desktop, Linux arm64-контейнери,
 Node 20.20.2, увімкнені tracing і notifications; dev-стек працював паралельно.
-50 запитів завершено за 3223 мс (15.52 фінальних операцій/с):
+50 запитів завершено за 2135 мс (23.42 фінальних операцій/с):
 
 | Результат | Кількість |
 |---|---:|
@@ -663,8 +670,8 @@ Node 20.20.2, увімкнені tracing і notifications; dev-стек прац
 
 | Час, мс | min | p50 | p95 | max |
 |---|---:|---:|---:|---:|
-| Відповідь POST /transfers | 42 | 344 | 548 | 571 |
-| POST → спостереження фіналу | 477 | 2642 | 3210 | 3213 |
+| Відповідь POST /transfers | 47 | 304 | 384 | 392 |
+| POST → спостереження фіналу | 852 | 1489 | 2123 | 2126 |
 
 Баланс відправника available/held — 0.00/0.00 USD, отримувача — 100.00 USD;
 подвійних списань і розбіжностей reconciliation немає. Значення часу залежать
@@ -672,10 +679,11 @@ Node 20.20.2, увімкнені tracing і notifications; dev-стек прац
 
 ## Стартовий код
 
-Без змін залишено `AuthService`, JWT-стратегії та DTO автентифікації,
-сторінки login/register, наявні Dockerfiles, основу Compose й окремі пакети
-NestJS/Next.js. Auth-контролер розширено throttle, сутність User — виправлено
-тип refreshTokenHash та прибрано зв'язок із Wallet; це не переписування auth.
+Збережено DTO login/register, bcrypt для паролів, наявні Dockerfiles,
+основу Compose й окремі пакети NestJS/Next.js. Auth доповнено throttle,
+повним хешуванням і атомарною ротацією refresh, logout та валідацією env;
+сутність User отримала явний тип refreshTokenHash і втратила зв’язок із Wallet.
+Login/register зберегли логіку форми й отримали лише оформлення та підписи.
 Стартер фактично не мав спільного prettier/tsconfig і підключеного брокера в
 notifications, хоча ТЗ описує їх як надані. Нові конфігурації не підміняють
 наявний стиль чи мажорні версії.
@@ -757,7 +765,7 @@ Refresh-токени хешувалися bcrypt, який обрізає вхі
 | Сторінка гаманців завжди 401 | фронтенд | `lib/api.ts` не передає `Authorization`, кука `accessToken` ніде не читається → `/wallets` завжди «Ledger API 401» | запущений стек: `GET /wallets` після логіну; зараз production HTTP-тести frontend | спочатку токен із cookies у ledgerFetch; зараз bffFetch додає Bearer, middleware оновлює access через refresh |
 | CI червоний | CI | `cache: npm` без lockfile, `jest` у payments без тестів → exit 1 | перший запуск CI | lockfiles у всіх сервісах; `jest --passWithNoTests` у payments і notifications прибрано після додавання тестів |
 | `payments-service` без авторизації | авторизація | `TransfersController` без JWT-guard, `GET /transfers/:id` без перевірки власника | огляд коду | JWT-guard; відправник бачить свій переказ, отримувач — тільки COMPLETED, іншим 404; ledger перевіряє власника при холді (`OWNER_MISMATCH`). Тести: `transfers.e2e-spec.ts` |
-| Ledger стартує без обов'язкових env | конфігурація | стартові JWT fallback-секрети приховують пропущені налаштування | процесний тест запуску без env був червоним до додавання валідації | валідацію додано, потім свідомо прибрано зі ledger; це залишкове обмеження, не закрита знахідка. Нові сервіси валідують env; dev-плейсхолдери дозволені |
+| Ledger стартує без обов'язкових env | конфігурація | стартові JWT fallback-секрети приховують пропущені налаштування | процесний тест запуску без env був червоним до додавання валідації | валідацію ledger відновлено без JWT fallback; процесні тести перевіряють відсутні env, production-плейсхолдери й придатність dev-прикладу. Сила секретів перевіряється лише в production |
 | Ledger змішаний з auth через ORM-зв'язок | архітектура | зв'язок `User` ↔ `Wallet` змішує auth-контекст з ledger | огляд коду | зв'язок прибрано: гаманець знає лише `ownerId` (без FK на `users`), баланс — проєкція подій з event store |
 | Ledger не стартує проти Postgres | старт сервісу | `User.refreshTokenHash: string \| null` без явного типу колонки → `DataTypeNotSupportedError` (unit-тести мокають репозиторій і цього не бачать) | `docker compose up --build` | `@Column({ type: 'varchar', nullable: true })` |
 | Образ ledger не запускається | збірка | у `tsconfig.json` немає `include`, а в ledger є `test/` → вихід у `dist/src/main.js`, а образ запускає `node dist/main` | `docker compose up --build` | `tsconfig.build.json` без `test` |
@@ -770,7 +778,7 @@ Refresh-токени хешувалися bcrypt, який обрізає вхі
 | Cookie/Bearer на сторінці гаманців; поточний BFF/refresh | [0e50bc3](https://github.com/JuFios/p2p-ledger/commit/0e50bc33b234f067d5663959a56ea0068f8002cb), [c559fc6](https://github.com/JuFios/p2p-ledger/commit/c559fc62f58e52c5b4926dec3cdb0fbf4bcf5d21) |
 | Відсутня авторизація payments | [6cecaf4](https://github.com/JuFios/p2p-ledger/commit/6cecaf4de1c183b888c2b8e4304571043b257f8a); видимість отримувачу лише COMPLETED — [9642804](https://github.com/JuFios/p2p-ledger/commit/9642804586ad351d179b03e815b49798ab8434de) |
 | Розділення auth/ledger, проєкція замість balance | [d172c17](https://github.com/JuFios/p2p-ledger/commit/d172c17018c1974147737e6c31957da5e454e27d) |
-| Валідація env ledger, потім її скасування | тест [e23e314](https://github.com/JuFios/p2p-ledger/commit/e23e314db2732d1b3f0468aca93ebff664cb06a3) → [6e1b6c2](https://github.com/JuFios/p2p-ledger/commit/6e1b6c21d4fcc4692911b14f2523c23cad20b17f); скасування [b9e87e2](https://github.com/JuFios/p2p-ledger/commit/b9e87e2c8567b7c19a8a231cbea13ca7c09ab3bc) |
+| Валідація env ledger: початкова історія та відновлення | тест [e23e314](https://github.com/JuFios/p2p-ledger/commit/e23e314db2732d1b3f0468aca93ebff664cb06a3) → [6e1b6c2](https://github.com/JuFios/p2p-ledger/commit/6e1b6c21d4fcc4692911b14f2523c23cad20b17f); скасування [b9e87e2](https://github.com/JuFios/p2p-ledger/commit/b9e87e2c8567b7c19a8a231cbea13ca7c09ab3bc); відновлення [4083816](https://github.com/JuFios/p2p-ledger/commit/4083816) |
 | Lockfiles і CI; тимчасовий дозвіл відсутніх тестів | [84821b0](https://github.com/JuFios/p2p-ledger/commit/84821b00af05563dde15dc569efdb252d9845468), [533554a](https://github.com/JuFios/p2p-ledger/commit/533554afadde675a259cd7d215ebbbff4e723b94); реальні suites — [6cecaf4](https://github.com/JuFios/p2p-ledger/commit/6cecaf4de1c183b888c2b8e4304571043b257f8a), [31827b8](https://github.com/JuFios/p2p-ledger/commit/31827b8b5f3e3bc45db88a376d4a037fd6635f47) |
 | Тип nullable refreshTokenHash | [4f089dd](https://github.com/JuFios/p2p-ledger/commit/4f089ddaf82906e08f8018f41bf03c0c76600215) |
 | Build output без test/ | [3301599](https://github.com/JuFios/p2p-ledger/commit/3301599972df4c51425a2806b2db59c3d2f600e6) |
@@ -801,7 +809,7 @@ cd apps/ledger-service && npm run test:e2e
 
 Додано `POST /auth/logout { refreshToken }` у ledger і BFF: чинний refresh відкликається без access-JWT, тому вихід працює й після закінчення access. Невалідний, прострочений чи вже замінений токен не зачіпає поточну сесію; відповідь 204. Нові logout-тести додано до BFF e2e, наявні перевірки збережено.
 
-- `auth.controller.ts` — на `POST /auth/login` додано `LoginThrottlerGuard` (ТЗ: rate limiting на логін). Ліміт рахується за email, а не за IP: усі запити до сервісу приходять через один BFF. Сам `AuthService` не змінювався.
+- `auth.controller.ts` — на `POST /auth/login` додано `LoginThrottlerGuard` (ТЗ: rate limiting на логін). Ліміт рахується за email, а не за IP: усі запити до сервісу приходять через один BFF. Перевірка пароля лишилася в `AuthService`.
 - `health` — крім БД показує стан Redis (стрім подій для інших сервісів). Недоступний Redis — деградація (`redis: down` у відповіді), а не відмова: запис у ledger від нього не залежить, події чекають в outbox, і relay не публікує, доки Redis не повернеться. `docker-compose.yml`: ledger-service на старті чекає на здоровий `redis`.
 - `main.ts` — Swagger на `/docs` і `enableShutdownHooks()` (фоновий outbox relay зупиняється коректно); `nest-cli.json` — плагін `@nestjs/swagger` (опис DTO без ручних декораторів).
 - Публічний контракт гаманців розширено: відповіді гаманця містять ті самі поля, що й у стартері (`balance` рядком), плюс `available`, `held`, `frozen`. **Зміна семантики:** `balance` = `available` + `held` — утримані під переказ кошти ще належать власнику, але витратити їх не можна, тож `withdraw` понад `available` дає 400, навіть якщо сума не перевищує `balance`. `deposit`/`withdraw` приймають опційний заголовок `Idempotency-Key` (повтор → той самий результат, той самий ключ з іншим тілом → 422 `IDEMPOTENCY_KEY_REUSED`); операції із замороженим гаманцем → 409 `WALLET_FROZEN`.
@@ -888,9 +896,9 @@ Login/register отримали лише презентаційні обгорт
   не спростовують успішного виконання попередньої спроби, відповідь якої
   загубилась. Після остаточної 4xx-відмови форму можна
   виправити, а новий переказ після фінального статусу починає нову спробу.
-  Це працює протягом життя відкритої форми; збереження незавершеної форми
-  між перезавантаженнями сторінки не реалізовано. Такий самий ключ використовується
-  для поповнення, оплати частки й створення split-рахунку через Server Action.
+  Незавершений запит переживає перезавантаження завдяки `sessionStorage`.
+  Такий самий підхід використовується для операцій гаманця, оплати частки
+  й створення split-рахунку через Server Action.
 - **Live.** `useLiveSocket` підключається до namespace `/ws`, показує
   online/offline/reconnecting, отримує `wallet.balance`, `transfer.status`
   і `activity.created`. Кожен `connect`, включно з reconnect, запускає REST-refetch
@@ -910,7 +918,7 @@ Login/register отримали лише презентаційні обгорт
 
 Після успішного refresh middleware протягом 30 секунд повертає ту саму пару токенів запізнілим запитам зі старою cookie. Кеш локальний одному процесу. Один `refreshTokenHash` на користувача означає одну refresh-сесію: новий login відкликає refresh попереднього пристрою.
 
-«Вийти» надсилає same-origin POST на `/api/auth/logout`, відкликає refresh через BFF і завжди очищає обидві cookie, навіть при недоступному upstream. Повна навігація на `/login` закриває сокет цього браузера. Logout завершує refresh-сесію всюди, але вже виданий stateless access-токен живе ще до 15 хв (`JWT_ACCESS_TTL`). Якщо BFF недоступний, серверне відкликання не гарантоване: refresh лишається чинним до завершення його строку. Старий токен після нового login не відновлюється.
+«Вийти» надсилає same-origin POST на `/api/auth/logout`, відкликає refresh через BFF і завжди очищає обидві cookie, навіть при недоступному upstream. Повна навігація на `/login` закриває сокет цього браузера. Logout завершує refresh-сесію всюди, але вже виданий stateless access-токен живе до завершення `JWT_ACCESS_TTL` (типово 15 хв). Якщо BFF недоступний, серверне відкликання не гарантоване: refresh лишається чинним до завершення його строку. Старий токен після нового login не відновлюється.
 
 Server Components і Server Actions викликають `BFF_URL` напряму. Клієнт ходить
 через `/api/bff/[...path]`: route handler додає Bearer з httpOnly-cookie,
@@ -936,12 +944,14 @@ SameSite=Lax та Secure при HTTPS.
 ### Зміни стартового коду frontend
 
 - `lib/api.ts` тепер викликає BFF замість ledger; auth API-проксі login/register
-  використовують його та зберігають upstream-статуси помилок. Наявні сторінки
-  login/register залишені без змін.
+  використовують його та зберігають upstream-статуси помилок. Сторінки
+  login/register зберегли поля, стан і submit-логіку; змінено оформлення.
 - `/wallets` зберігає початкове завантаження на сервері й передає його новому
   Client Component для live-балансів, відкриття гаманця та поповнення.
-- `layout.tsx` доповнено навігацією до реалізованих сторінок; inline styles
-  і мінімальний стиль стартера збережено.
+- Кореневий `layout.tsx` підключає локальний Inter і глобальні токени;
+  layout захищеної route group додає адаптивну навігацію з роллю та logout.
+  Оформлення використовує Tailwind; inline styles залишено лише для
+  динамічної геометрії progress/waterfall.
 - `.env.example` та frontend-секція Compose використовують `BFF_URL` замість
   прямих `LEDGER_SERVICE_URL`/`PAYMENTS_SERVICE_URL`. `NEXT_PUBLIC_WS_URL` замінено
   на `WS_PUBLIC_URL`: адреса надходить у runtime з `/api/auth/ws-token`,
@@ -977,6 +987,12 @@ Node test runner. Перевіряються втрачена відповідь
 зупинка при unmount і захист від запізнілої відповіді іншого переказу.
 Наявні HTTP-тести не змінено.
 
+У поточному наборі 35 frontend-тестів: попередні 25 лишилися без змін;
+додано 5 DOM-перевірок відновлення чотирьох форм і заблокованого сховища,
+1 DOM-перевірку перепідключення після серверного disconnect, 1 перевірку
+точного форматування сум, 1 refresh grace і 2 logout. Мутація без запису
+в сховище робить усі чотири тести відновлення червоними.
+
 Підходи відповідають документації [Next.js 14: Middleware](https://nextjs.org/docs/14/app/building-your-application/routing/middleware),
 [Server Actions](https://nextjs.org/docs/14/app/building-your-application/data-fetching/server-actions-and-mutations)
 і [Socket.IO 4: Client options](https://socket.io/docs/v4/client-options/).
@@ -994,6 +1010,10 @@ Node test runner. Перевіряються втрачена відповідь
   Для подальшого розвитку потрібен окремий перехід на підтримуваний Node LTS
   (22+), нові мажори NestJS/Next.js з перевіркою міграцій і залежностей;
   у межах цього рішення версії не оновлювалися.
+- `npm audit --omit=dev` на 2026-11-02: frontend — 2 знахідки
+  (1 critical, 1 high), ledger — 24 (1 critical, 8 high, 15 moderate).
+  Виправлення потребують окремого мажорного оновлення сумісного стека;
+  примусове `npm audit fix --force` не застосовувалося.
 - FX лишається мок-модулем із курсами з env, без окремого fx-service та
   зовнішнього провайдера. Ліміт суми однаковий у номінальних одиницях різних
   валют; чорний список — демонстраційне правило. Реальні котирування й
@@ -1007,15 +1027,15 @@ Node test runner. Перевіряються втрачена відповідь
   replay; Kafka можна розглянути при відповідних обсягах, не як необхідність
   для локальної демонстрації. Jaeger також зберігає traces у пам'яті.
 - WS — push після коміту, без гарантованого replay; відновлення — REST на
-  connect. Масштабування потребує спільного адаптера кімнат, узгодження
-  порядку emit і політики строку WS-сесії. Ключ форми й знімок тіла живуть
-  лише до перезавантаження; кілька frontend-інстансів потребують узгодженого
-  refresh. Ці обмеження не усуває дедуплікація брокера.
+  connect. Масштабування потребує спільного адаптера кімнат і узгодження
+  порядку emit; кілька frontend-інстансів — узгодженого refresh. Строк
+  WS-сесії обмежено `exp`, а ключі незавершених форм зберігаються у
+  `sessionStorage` вкладки. Це не забезпечує replay пропущених push.
 - Для зовнішнього розгортання потрібні керування секретами, TLS/mTLS замість
   спільного internal token у відкритій мережі, закриті БД/Redis/metrics/docs,
   резервні копії та міграція реальних даних замість скидання dev-томів.
-  Ledger fallback-секрети й відсутність env-валідації залишені свідомо;
-  production-політику слід визначити окремо.
+  Валідація ledger відхиляє слабкі JWT/internal секрети й пароль адміністратора
+  при `NODE_ENV=production`; у штатному dev Compose цей режим не ввімкнено.
 - Saga runner чекає найповільніший переказ пачки; пул із поповненням вільних
   слотів покращив би використання ресурсів. Лічильники rate limit локальні
   процесу. Усі поточні перевірки виконують конкретні сценарії та гонки;
