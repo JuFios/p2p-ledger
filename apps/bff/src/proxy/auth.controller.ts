@@ -8,6 +8,10 @@ import { ProxyRequest, UpstreamService } from './upstream.service';
 @Controller('auth')
 export class AuthController {
   constructor(private readonly upstream: UpstreamService) {}
+  @Post('logout')
+  logout(@Body() dto: RefreshDto, @Req() req: ProxyRequest, @Res() res: Response) {
+    return this.upstream.forward('ledger', '/auth/logout', req, res, 'POST', dto);
+  }
   @Post('register')
   register(
     @Body() dto: RegisterDto,

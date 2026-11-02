@@ -88,4 +88,23 @@ export class AuthService {
     await this.users.save(user);
     return { accessToken, refreshToken };
   }
+
+  async logout(refreshToken: string): Promise<void> {
+    let payload: { sub: string };
+    try {
+      payload = this.jwt.verify(refreshToken, {
+        secret: process.env.JWT_REFRESH_SECRET ?? 'change-me-refresh',
+      });
+    } catch { return; }
+    const user = await this.users.findOne({ where: { id: payload.sub } });
+    if (!user?.refreshTokenHash) return;
+    const actual = Buffer.from(createHash('sha256').update(refreshToken).digest('hex'));
+    const expected = Buffer.from(user.refreshTokenHash);
+    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return;
+    // Умова захищає нову сесію, створену паралельно з logout.
+    await this.users.update(
+      { id: user.id, refreshTokenHash: user.refreshTokenHash },
+      { refreshTokenHash: null },
+    );
+  }
 }

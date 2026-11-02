@@ -773,6 +773,8 @@ cd apps/ledger-service && npm run test:e2e
 
 `AuthService.issueTokens/refresh`: SHA-256 замість bcrypt для refresh-токенів усуває обрізання JWT й відновлює відкликання попереднього токена після ротації або входу. Паролі й далі хешуються bcrypt. Зміна не потребує міграції, але наявні dev-сесії потребують одноразового повторного входу.
 
+Додано `POST /auth/logout { refreshToken }` у ledger і BFF: чинний refresh відкликається без access-JWT, тому вихід працює й після закінчення access. Невалідний, прострочений чи вже замінений токен не зачіпає поточну сесію; відповідь 204. Нові logout-тести додано до BFF e2e, наявні перевірки збережено.
+
 - `auth.controller.ts` — на `POST /auth/login` додано `LoginThrottlerGuard` (ТЗ: rate limiting на логін). Ліміт рахується за email, а не за IP: усі запити до сервісу приходять через один BFF. Сам `AuthService` не змінювався.
 - `health` — крім БД показує стан Redis (стрім подій для інших сервісів). Недоступний Redis — деградація (`redis: down` у відповіді), а не відмова: запис у ledger від нього не залежить, події чекають в outbox, і relay не публікує, доки Redis не повернеться. `docker-compose.yml`: ledger-service на старті чекає на здоровий `redis`.
 - `main.ts` — Swagger на `/docs` і `enableShutdownHooks()` (фоновий outbox relay зупиняється коректно); `nest-cli.json` — плагін `@nestjs/swagger` (опис DTO без ручних декораторів).
@@ -858,6 +860,8 @@ cd apps/ledger-service && npm run test:e2e
 ### Доступ до BFF та сесія
 
 Після успішного refresh middleware протягом 30 секунд повертає ту саму пару токенів запізнілим запитам зі старою cookie. Кеш локальний одному процесу. Один `refreshTokenHash` на користувача означає одну refresh-сесію: новий login відкликає refresh попереднього пристрою.
+
+«Вийти» надсилає same-origin POST на `/api/auth/logout`, відкликає refresh через BFF і завжди очищає обидві cookie, навіть при недоступному upstream. Повна навігація на `/login` закриває сокет цього браузера. Logout завершує refresh-сесію всюди, але вже виданий stateless access-токен живе ще до 15 хв (`JWT_ACCESS_TTL`). Якщо BFF недоступний, серверне відкликання не гарантоване: refresh лишається чинним до завершення його строку. Старий токен після нового login не відновлюється.
 
 Server Components і Server Actions викликають `BFF_URL` напряму. Клієнт ходить
 через `/api/bff/[...path]`: route handler додає Bearer з httpOnly-cookie,

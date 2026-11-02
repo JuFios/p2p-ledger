@@ -16,6 +16,7 @@ export default function RootLayout({
           <a href="/split-bills">Спільні рахунки</a>
           <a href="/activity">Активність</a>
           <a href="/admin">Адміністрування</a>
+          <form method="post" action="/api/auth/logout"><button type="submit">Вийти</button></form>
         </nav>
         {children}
       </body>
