@@ -22,7 +22,7 @@ const paid = {
   shares: [{ ...bill.shares[0], status: 'PAID' }, bill.shares[1]],
 };
 
-async function mount(t) {
+async function mount(t, props = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
   const requests = [];
   let handlers;
@@ -37,6 +37,7 @@ async function mount(t) {
   const root = createRoot(document.getElementById('root'));
   await act(async () => root.render(React.createElement(BillDetails, {
     userId: 'owner', email: bill.creatorEmail, initial: bill, initialWallets: [], initialError: null,
+    ...props,
   })));
   t.after(async () => { await act(async () => root.unmount()); });
   return { requests, handlers, root, monitor };
@@ -126,4 +127,66 @@ test('unmount prevents a pending refresh from continuing transfer work', async t
   assert.equal(document.getElementById('root').textContent, '');
   assert.equal(requests.length, 2);
   assert.equal(monitor.refreshes, 0);
+});
+
+const accepted = { ...bill, shares: [{ ...bill.shares[0], status: 'ACCEPTED' }, bill.shares[1]] };
+const wallet = { id: 'alice-wallet', currency: 'USD', balance: '5.00', available: '5.00', held: '0.00', frozen: false };
+const button = text => [...document.querySelectorAll('button')].find(value => value.textContent === text);
+
+test('bill polling preserves an initial wallet failure and its retry action', async t => {
+  const { requests } = await mount(t, {
+    userId: 'alice', email: 'alice@example.com', initial: accepted, initialError: 'wallets unavailable',
+  });
+  await act(async () => t.mock.timers.tick(2000));
+  await resolve(requests[0], { message: 'temporary poll failure' }, 503);
+  assert.match(document.body.textContent, /wallets unavailable/);
+  await act(async () => t.mock.timers.tick(2000));
+  await resolve(requests[1], accepted);
+  assert.match(document.body.textContent, /wallets unavailable/);
+  assert(button('Спробувати ще раз'));
+  assert.equal(document.querySelector('select').options.length, 0);
+  assert.equal(button('Сплатити свою частку').disabled, true);
+  assert(requests.every(r => String(r.url).endsWith('/split-bills/bill')));
+});
+
+test('a failed wallet refresh survives bill polling until a full retry succeeds', async t => {
+  const { requests, handlers } = await mount(t, {
+    userId: 'alice', email: 'alice@example.com', initial: accepted,
+  });
+  let refresh;
+  await act(async () => { refresh = handlers.onConnect(); });
+  await resolve(requests[0], accepted);
+  await resolve(requests[1], { message: 'wallet refresh failed' }, 503);
+  await act(async () => refresh);
+  assert.match(document.body.textContent, /wallet refresh failed/);
+  await act(async () => t.mock.timers.tick(2000));
+  await resolve(requests[2], accepted);
+  assert.match(document.body.textContent, /wallet refresh failed/);
+  assert(button('Спробувати ще раз'));
+  await act(async () => button('Спробувати ще раз').click());
+  assert(String(requests[3].url).endsWith('/split-bills/bill'));
+  assert(String(requests[4].url).endsWith('/wallets'));
+  await resolve(requests[3], accepted);
+  assert.match(document.body.textContent, /wallet refresh failed/);
+  await resolve(requests[4], [wallet]);
+  assert.doesNotMatch(document.body.textContent, /wallet refresh failed/);
+  assert.equal(button('Спробувати ще раз'), undefined);
+  assert.equal(document.querySelector('select').value, wallet.id);
+  assert.equal(button('Сплатити свою частку').disabled, false);
+  assert.doesNotMatch(document.body.textContent, /Відкрийте гаманець/);
+});
+
+test('a full retry clears a polling failure even when polling stops', async t => {
+  const { requests } = await mount(t);
+  await act(async () => t.mock.timers.tick(2000));
+  await resolve(requests[0], { message: 'poll unavailable' }, 503);
+  assert.match(document.body.textContent, /poll unavailable/);
+  await act(async () => button('Спробувати ще раз').click());
+  const settled = { ...paid, status: 'SETTLED', shares: paid.shares.map(s => ({ ...s, status: 'PAID' })) };
+  await resolve(requests[1], settled);
+  await resolve(requests[2], []);
+  assert.doesNotMatch(document.body.textContent, /poll unavailable/);
+  assert.equal(button('Спробувати ще раз'), undefined);
+  await act(async () => t.mock.timers.tick(6000));
+  assert.equal(requests.length, 3);
 });

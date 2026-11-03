@@ -375,7 +375,7 @@ available/held/frozen. Витрати обмежені available, frozen бло�
 | Frontend format/BillDetails | UTC SSR → пояс браузера замість фіксованого поясу; перевірки hydration, DST і включного календаря. |
 | Payments split-validation | Два direct-call null тести проходять реальний ValidationPipe → сервіс: null відхиляється до hash/БД, з ключем і без. HTTP e2e збережено. |
 
-Регресійні тести охоплюють переставлені відповіді й помилки polling/live/manual,
+Регресійні тести охоплюють переставлені відповіді polling/live/manual і збереження помилки гаманців до успішного повного оновлення,
 DST опівночі, logout за проксі та конкурентну реєстрацію на PostgreSQL.
 Для logout очікується відносний Location, для реєстрації — один акаунт, решта відповідей 409 та чинні login/refresh переможця.
 

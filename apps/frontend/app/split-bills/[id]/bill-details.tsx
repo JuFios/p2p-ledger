@@ -47,6 +47,7 @@ export function BillDetails({
   const [bill, setBill] = useState(initial);
   const [wallets, setWallets] = useState(initialWallets);
   const [error, setError] = useState(initialError);
+  const [pollError, setPollError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [restoredWallet, setRestoredWallet] = useState<string | null>(null);
   const attempt = useRef<{ key: string; shareId: string; body: string } | null>(
@@ -68,6 +69,7 @@ export function BillDetails({
         setBill(nextBill);
         setWallets(nextWallets);
         setError(null);
+        setPollError(null);
       }
     } catch (err) {
       if (request === revision.current) setError((err as Error).message);
@@ -132,10 +134,10 @@ export function BillDetails({
           const value = await clientFetch<SplitBill>(`/split-bills/${bill.id}`, undefined, parseBill);
           if (!stopped && request === revision.current) {
             setBill(value);
-            setError(null);
+            setPollError(null);
           }
         } catch (err) {
-          if (!stopped && request === revision.current) setError((err as Error).message);
+          if (!stopped && request === revision.current) setPollError((err as Error).message);
         }
       }
       if (!stopped) timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
@@ -225,7 +227,7 @@ export function BillDetails({
           Сервіс повернув новий стан. Оплату й підтвердження вимкнено; оновіть рахунок пізніше.
         </Alert>
       )}
-      {(error || monitor.error) && (
+      {(error || pollError || monitor.error) && (
         <Alert
           action={
             <Button variant="ghost" onClick={() => void reload()}>
@@ -233,7 +235,7 @@ export function BillDetails({
             </Button>
           }
         >
-          {error || monitor.error}
+          {error || pollError || monitor.error}
         </Alert>
       )}
       <div className="grid items-start gap-6 lg:grid-cols-3">
