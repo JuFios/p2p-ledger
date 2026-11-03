@@ -7,6 +7,7 @@ export function money(value: string | null | undefined) {
 }
 export function dateLabel(value: string) {
   return new Date(value).toLocaleDateString('uk-UA', {
+    timeZone: 'Europe/Kyiv',
     day: 'numeric',
     month: 'short',
     year: 'numeric',

@@ -18,10 +18,14 @@ export type ProxyRequest = Pick<Request, 'headers'>;
 @Injectable()
 export class UpstreamService {
   private readonly logger = new Logger(UpstreamService.name);
+  private readonly timeoutMs: number;
+
   constructor(
     private readonly http: HttpService,
     private readonly config: ConfigService,
-  ) {}
+  ) {
+    this.timeoutMs = httpBudget(Number(config.get('CB_TIMEOUT_MS', 3000))).bff;
+  }
 
   async request<T = unknown>(
     source: Source,
@@ -50,7 +54,7 @@ export class UpstreamService {
         data: options.body,
         params: options.query,
         headers,
-        timeout: httpBudget(Number(this.config.get('CB_TIMEOUT_MS', 3000))).bff,
+        timeout: this.timeoutMs,
         maxRedirects: 0,
         validateStatus: () => true,
       });

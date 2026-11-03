@@ -55,6 +55,7 @@ export class SplitBillsService {
     dto: CreateSplitBillDto,
     idempotencyKey?: string,
   ): Promise<CreateSplitBillResult> {
+    // Прямі виклики сервісу теж перевіряємо до hashOf: null інакше дає 500.
     for (const participant of dto.participants) {
       if (participant.amount !== undefined && !isMoneyAmount(participant.amount)) {
         throw badRequest('INVALID_AMOUNT', 'Сума учасника має бути додатним числом до 1000000 з не більше ніж двома знаками');

@@ -78,29 +78,66 @@ export function isFinal(transfer: Pick<Transfer, 'status'>) {
   return transfer.status === 'COMPLETED' || transfer.status === 'FAILED';
 }
 
+function record(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Сервіс повернув некоректну відповідь. Спробуйте пізніше.');
+  }
+  return value as Record<string, unknown>;
+}
+
 function known(value: unknown, allowed: readonly string[]) {
-  if (value !== undefined && (typeof value !== 'string' || !allowed.includes(value)))
+  if (typeof value !== 'string' || !allowed.includes(value)) {
     throw new Error('Сервіс повернув невідомий стан. Оновіть сторінку або спробуйте пізніше.');
-}
-// Невідома версія контракту не запускає дії зі станом, який UI не розуміє.
-export function validateApiState(path: string, value: unknown): void {
-  if (/^\/split-bills\/[^/]+\/shares\/[^/]+\/pay$/.test(path)) {
-    validateApiState('/transfers', value);
-    return;
-  }
-  if (Array.isArray(value)) { value.forEach(item => validateApiState(path, item)); return; }
-  if (!value || typeof value !== 'object') return;
-  const item = value as Record<string, unknown>;
-  if (path.startsWith('/wallets')) known(item.currency, CURRENCIES);
-  if (path.startsWith('/transfers')) {
-    known(item.status, TRANSFER_STATUSES); known(item.step, TRANSFER_STEPS);
-    known(item.currency, CURRENCIES); known(item.toCurrency, CURRENCIES);
-  }
-  if (path.startsWith('/split-bills')) {
-    known(item.status, BILL_STATUSES); known(item.mode, SPLIT_MODES); known(item.currency, CURRENCIES);
-    if (Array.isArray(item.shares)) for (const share of item.shares) known(share.status, SHARE_STATUSES);
   }
 }
-export function validTransferUpdate(value: TransferUpdate) {
-  return TRANSFER_STATUSES.includes(value.status) && TRANSFER_STEPS.includes(value.step);
+
+export function parseWallet(value: unknown): Wallet {
+  const item = record(value);
+  known(item.currency, CURRENCIES);
+  return item as unknown as Wallet;
+}
+
+export function parseTransfer(value: unknown): Transfer {
+  const item = record(value);
+  known(item.status, TRANSFER_STATUSES);
+  known(item.step, TRANSFER_STEPS);
+  known(item.currency, CURRENCIES);
+  known(item.toCurrency, CURRENCIES);
+  return item as unknown as Transfer;
+}
+
+export function parseBill(value: unknown): SplitBill {
+  const item = record(value);
+  known(item.status, BILL_STATUSES);
+  known(item.mode, SPLIT_MODES);
+  known(item.currency, CURRENCIES);
+  parseList(share => {
+    known(record(share).status, SHARE_STATUSES);
+    return share;
+  })(item.shares);
+  return item as unknown as SplitBill;
+}
+
+export function parseList<T>(parse: (value: unknown) => T) {
+  return (value: unknown): T[] => {
+    if (!Array.isArray(value)) {
+      throw new Error('Сервіс повернув некоректний список. Спробуйте пізніше.');
+    }
+    return value.map(parse);
+  };
+}
+
+export function validTransferUpdate(value: unknown): value is TransferUpdate {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as TransferUpdate;
+  return typeof item.transferId === 'string' &&
+    TRANSFER_STATUSES.includes(item.status) && TRANSFER_STEPS.includes(item.step);
+}
+
+export function validWalletUpdate(value: unknown): value is WalletUpdate {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as WalletUpdate;
+  return typeof item.walletId === 'string' && CURRENCIES.includes(item.currency) &&
+    [item.balance, item.available, item.held].every(amount =>
+      typeof amount === 'string' && /^-?\d+\.\d{2}$/.test(amount));
 }

@@ -19,7 +19,7 @@ for (const service of ['bff', 'ledger-service', 'payments-service']) {
 for (const service of ['bff', 'ledger-service']) sync('contracts/is-calendar-date.ts', `apps/${service}/src/common/is-calendar-date.ts`);
 for (const [service, prefix, lock] of [['ledger-service', 'LEDGER', '0x6c656467'], ['payments-service', 'PAYMENTS', '0x7061796d']]) {
   sync('contracts/outbox-relay.service.ts.template', `apps/${service}/src/outbox/outbox-relay.service.ts`, {
-    STREAM_CONSTANT: `${prefix}_EVENTS_STREAM`, STREAM: `stream:${prefix.toLowerCase()}-events`, LOCK: lock, PRODUCER: service,
+    STREAM_CONSTANT: `${prefix}_EVENTS_STREAM`, STREAM: `stream:${prefix.toLowerCase()}-events`, LOCK: lock, LOCK_LABEL: prefix === 'LEDGER' ? 'ledg' : 'paym', PRODUCER: service,
   });
 }
 for (const service of ['bff', 'payments-service']) sync('contracts/http-budget.ts', `apps/${service}/src/common/http-budget.ts`);

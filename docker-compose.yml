@@ -72,6 +72,7 @@ services:
     build: ./apps/ledger-service
     env_file: ./apps/ledger-service/.env.example
     environment:
+      NODE_ENV: development
       DATABASE_HOST: ledger-db
     depends_on:
       ledger-db:
@@ -88,6 +89,7 @@ services:
 
   payments-service:
     environment:
+      NODE_ENV: development
       CB_TIMEOUT_MS: ${CB_TIMEOUT_MS:-3000}
     build: ./apps/payments-service
     env_file: ./apps/payments-service/.env.example
@@ -107,6 +109,8 @@ services:
       retries: 10
 
   notifications-service:
+    environment:
+      NODE_ENV: development
     build: ./apps/notifications-service
     env_file: ./apps/notifications-service/.env.example
     depends_on:
@@ -124,6 +128,7 @@ services:
 
   bff:
     environment:
+      NODE_ENV: development
       CB_TIMEOUT_MS: ${CB_TIMEOUT_MS:-3000}
     build: ./apps/bff
     env_file: ./apps/bff/.env.example

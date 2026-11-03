@@ -19,7 +19,7 @@ export const LEDGER_EVENTS_STREAM = 'stream:ledger-events';
 const BATCH = 100;
 
 // Ключ advisory lock relay: публікує лише один інстанс одночасно.
-const RELAY_LOCK = 0x6c656467;
+const RELAY_LOCK = 0x6c656467; // 'ledg'
 
 interface OutboxRow {
   id: string;
@@ -36,7 +36,9 @@ interface OutboxRow {
 // XADD виконується до коміту, тож падіння між ними дає повторну публікацію
 // (at-least-once) — її поглинає дедуплікація консюмера за eventId.
 // Кілька інстансів не публікують паралельно (advisory lock): інакше сусідні
-// батчі потрапили б у стрім упереміш. Стабільний outbox.id зберігає порядок
+// батчі потрапили б у стрім упереміш. Записи одного гаманця серіалізовано
+// його блокуванням, тому порядок outbox.id відповідає порядку змін гаманця.
+// Стабільний outbox.id зберігає порядок
 // станів ресурсу також при повторній публікації.
 @Injectable()
 export class OutboxRelay implements OnModuleInit, BeforeApplicationShutdown {

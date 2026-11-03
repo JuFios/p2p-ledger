@@ -41,3 +41,16 @@ it('keeps timeout and connection diagnostics distinct without leaking request se
     expect(JSON.stringify(warn.mock.calls)).not.toContain('secret-');
   } finally { warn.mockRestore(); }
 });
+
+it.each(['', ' ', 'invalid', '0', '60001'])('rejects invalid timeout configuration before serving requests (%s)', (value) => {
+  expect(() => new UpstreamService(new HttpService(), new ConfigService({ CB_TIMEOUT_MS: value }))).toThrow('CB_TIMEOUT_MS');
+});
+
+it('computes the upstream budget once at startup', async () => {
+  const config = new ConfigService({ CB_TIMEOUT_MS: '4000', LEDGER_SERVICE_URL: 'http://ledger:3001' });
+  const request = jest.fn().mockResolvedValue({ status: 200 });
+  const service = new UpstreamService({ axiosRef: { request } } as unknown as HttpService, config);
+  config.set('CB_TIMEOUT_MS', '');
+  await service.request('ledger', '/wallets');
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({ timeout: 6000 }));
+});

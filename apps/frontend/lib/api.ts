@@ -1,5 +1,4 @@
-import { validateApiState } from './types';
-import { httpBudget } from './http-budget';
+import { FRONTEND_TIMEOUT_MS } from './server-config';
 import { cookies } from 'next/headers';
 
 import { ApiError, readResponse } from './http';
@@ -10,6 +9,7 @@ const BFF_URL = process.env.BFF_URL ?? 'http://localhost:3004';
 export async function bffFetch<T>(
   path: string,
   init?: RequestInit,
+  parse?: (value: unknown) => T,
 ): Promise<T> {
   // Токен лежить у httpOnly-куці (див. api/auth/login), тож додаємо його тут.
   const token = cookies().get('accessToken')?.value;
@@ -26,13 +26,12 @@ export async function bffFetch<T>(
       ...init,
       headers,
       cache: 'no-store',
-      signal: init?.signal ?? AbortSignal.timeout(httpBudget(Number(process.env.CB_TIMEOUT_MS ?? 3000)).frontend),
+      signal: init?.signal ?? AbortSignal.timeout(FRONTEND_TIMEOUT_MS),
       redirect: 'manual',
     });
   } catch {
     throw new ApiError(503, 'Сервіс тимчасово недоступний. Спробуйте ще раз.');
   }
   const value = await readResponse<T>(res);
-  validateApiState(path, value);
-  return value;
+  return parse ? parse(value) : value;
 }

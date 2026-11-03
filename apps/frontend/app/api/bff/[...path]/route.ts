@@ -1,4 +1,4 @@
-import { httpBudget } from '@/lib/http-budget';
+import { FRONTEND_TIMEOUT_MS } from '@/lib/server-config';
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -56,7 +56,7 @@ async function proxy(
         headers,
         body: req.method === 'GET' ? undefined : await req.text(),
         cache: 'no-store',
-        signal: AbortSignal.timeout(httpBudget(Number(process.env.CB_TIMEOUT_MS ?? 3000)).frontend),
+        signal: AbortSignal.timeout(FRONTEND_TIMEOUT_MS),
         redirect: 'manual',
       },
     );

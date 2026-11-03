@@ -1,8 +1,8 @@
+import { parseList, parseWallet, Wallet } from '@/lib/types';
 import { sessionClaims } from '@/lib/session';
 import { cookies } from 'next/headers';
 import { PageHeading } from '@/components/ui/index';
 import { bffFetch } from '@/lib/api';
-import { Wallet } from '@/lib/types';
 import { TransferForm } from '@/app/transfers/new/transfer-form';
 
 export default async function NewTransferPage() {
@@ -10,7 +10,7 @@ export default async function NewTransferPage() {
   let wallets: Wallet[] = [];
   let error: string | null = null;
   try {
-    wallets = await bffFetch<Wallet[]>('/wallets');
+    wallets = await bffFetch<Wallet[]>('/wallets', undefined, parseList(parseWallet));
   } catch (err) {
     error = (err as Error).message;
   }

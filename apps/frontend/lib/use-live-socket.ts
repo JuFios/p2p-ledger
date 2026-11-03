@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { Activity, CURRENCIES, validTransferUpdate, TransferUpdate, WalletUpdate } from './types';
+import { Activity, validWalletUpdate, validTransferUpdate, TransferUpdate, WalletUpdate } from './types';
 
 interface LiveHandlers {
   onConnect?: () => void;
@@ -68,10 +68,10 @@ export function useLiveSocket(handlers: LiveHandlers) {
           setStatus(navigator.onLine ? 'reconnecting' : 'offline');
           if (!socket?.active) schedule(() => socket?.connect());
         });
-        socket.on('wallet.balance', (value: WalletUpdate) =>
-          CURRENCIES.includes(value.currency) ? callbacks.current.onWallet?.(value) : callbacks.current.onConnect?.(),
+        socket.on('wallet.balance', (value: unknown) =>
+          validWalletUpdate(value) ? callbacks.current.onWallet?.(value) : callbacks.current.onConnect?.(),
         );
-        socket.on('transfer.status', (value: TransferUpdate) =>
+        socket.on('transfer.status', (value: unknown) =>
           validTransferUpdate(value) ? callbacks.current.onTransfer?.(value) : callbacks.current.onConnect?.(),
         );
         socket.on('activity.created', (value: Activity) =>

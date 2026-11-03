@@ -56,17 +56,61 @@ for (const staleFailure of [false, true]) {
   });
 }
 
-test('unknown API statuses, steps, currencies and modes fail explicitly', () => {
-  const { validateApiState, validTransferUpdate } = loadSource('lib/types.ts');
-  for (const [path, value] of [
-    ['/transfers/id', { status: 'COMPELTED' }], ['/transfers/id', { step: 'RESERVE' }],
-    ['/wallets', [{ currency: 'GBP' }]], ['/split-bills/id', { mode: 'RANDOM' }],
-    ['/split-bills/id', { shares: [{ status: 'SETTLED' }] }],
-  ]) assert.throws(() => validateApiState(path, value), /невідомий стан/);
+test('response parsers reject unknown states and unexpected response shapes', () => {
+  const { parseWallet, parseTransfer, parseBill, parseList, validTransferUpdate } = loadSource('lib/types.ts');
+  const transfer = { status: 'COMPLETED', step: 'DONE', currency: 'USD', toCurrency: 'USD' };
+  const bill = { status: 'PENDING', mode: 'CUSTOM', currency: 'USD', shares: [] };
+  for (const value of [
+    { ...transfer, status: 'COMPELTED' }, { ...transfer, step: 'RESERVE' },
+    { ...transfer, currency: 'GBP' }, { ...transfer, toCurrency: 'GBP' },
+  ]) assert.throws(() => parseTransfer(value), /невідомий стан/);
+  assert.throws(() => parseWallet({ currency: 'GBP' }), /невідомий стан/);
+  assert.throws(() => parseBill({ ...bill, mode: 'RANDOM' }), /невідомий стан/);
+  assert.throws(() => parseBill({ ...bill, shares: [{ status: 'SETTLED' }] }), /невідомий стан/);
+  for (const value of [null, undefined, { items: [] }]) {
+    assert.throws(() => parseList(parseWallet)(value), /некоректний список/);
+    assert.throws(() => parseTransfer(value));
+  }
   assert.equal(validTransferUpdate({ status: 'FUTURE', step: 'DONE' }), false);
 });
 
-test('split payment decodes its transfer response rather than a bill status', () => {
-  const { validateApiState } = loadSource('lib/types.ts');
-  assert.doesNotThrow(() => validateApiState('/split-bills/bill/shares/share/pay', { status: 'COMPLETED', step: 'DONE', currency: 'USD', toCurrency: 'USD' }));
+test('split payment explicitly parses its transfer response', async (t) => {
+  const { parseTransfer } = loadSource('lib/types.ts');
+  const { clientFetch } = loadSource('lib/http.ts');
+  const transfer = { status: 'COMPLETED', step: 'DONE', currency: 'USD', toCurrency: 'USD' };
+  t.mock.method(globalThis, 'fetch', async () => Response.json(transfer));
+  assert.deepEqual(await clientFetch('/split-bills/bill/shares/share/pay', undefined, parseTransfer), transfer);
+});
+
+test('BillDetails hydrates the same due date from UTC into a Kyiv browser', async () => {
+  const { renderToString } = require('react-dom/server');
+  const { hydrateRoot } = require('react-dom/client');
+  const { BillDetails } = loadSource('app/split-bills/[id]/bill-details.tsx', {
+    '@/lib/use-live-socket': { useLiveSocket: () => 'offline' },
+    '../actions': { acceptShare: async () => ({}) },
+  });
+  const element = React.createElement(BillDetails, {
+    userId: 'user', email: 'owner@example.com', initialError: null, initialWallets: [],
+    initial: { id: 'bill', title: 'Вечеря', creatorEmail: 'owner@example.com', totalAmount: '1.00', currency: 'USD', mode: 'CUSTOM', status: 'PENDING', dueAt: '2030-01-01T23:30:00Z', shares: [] },
+  });
+  const previous = process.env.TZ;
+  let root;
+  const errors = [];
+  try {
+    process.env.TZ = 'UTC';
+    const container = document.getElementById('root');
+    container.innerHTML = renderToString(element);
+    const serverText = container.textContent;
+    process.env.TZ = 'Europe/Kyiv';
+    await act(async () => {
+      root = hydrateRoot(container, element, { onRecoverableError: error => errors.push(error.message) });
+    });
+    assert.deepEqual(errors, []);
+    assert.equal(container.textContent, serverText);
+    assert.match(serverText, /2 січ/);
+  } finally {
+    if (root) await act(async () => root.unmount());
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
 });

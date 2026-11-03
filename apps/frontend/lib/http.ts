@@ -1,4 +1,3 @@
-import { validateApiState } from './types';
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -30,6 +29,7 @@ export async function readResponse<T>(res: Response): Promise<T> {
 export async function clientFetch<T>(
   path: string,
   init?: RequestInit,
+  parse?: (value: unknown) => T,
 ): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body) headers.set('Content-Type', 'application/json');
@@ -39,6 +39,5 @@ export async function clientFetch<T>(
     cache: 'no-store',
   });
   const value = await readResponse<T>(res);
-  validateApiState(path, value);
-  return value;
+  return parse ? parse(value) : value;
 }

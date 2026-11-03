@@ -1,5 +1,6 @@
 'use client';
 
+import { parseTransfer, parseList, parseWallet, CURRENCIES, isFinal, Transfer, Wallet } from '@/lib/types';
 import { useEffect, useRef, useState } from 'react';
 import {
   attemptScope,
@@ -8,7 +9,6 @@ import {
   writeAttempt,
 } from '@/lib/attempt-storage';
 import { ApiError, clientFetch, isDefinitiveRejection } from '@/lib/http';
-import { CURRENCIES, isFinal, Transfer, Wallet } from '@/lib/types';
 import { useLiveSocket } from '@/lib/use-live-socket';
 import { useTransfer } from '@/lib/use-transfer';
 import { money } from '@/lib/format';
@@ -72,7 +72,7 @@ export function TransferForm({
   async function reload() {
     const current = ++revision.current;
     try {
-      const values = await clientFetch<Wallet[]>('/wallets');
+      const values = await clientFetch<Wallet[]>('/wallets', undefined, parseList(parseWallet));
       if (current !== revision.current) return;
       setWallets(values);
       setWalletId((old) => old || values.find((w) => !w.frozen)?.id || '');
@@ -114,7 +114,7 @@ export function TransferForm({
         method: 'POST',
         headers: { 'Idempotency-Key': saved.key },
         body: saved.body,
-      });
+      }, parseTransfer);
       monitor.track(value);
     } catch (err) {
       if (err instanceof ApiError && isDefinitiveRejection(err.status)) {
