@@ -54,8 +54,11 @@ export function BillDetails({
   );
   const monitor = useTransfer();
   const revision = useRef(0);
+  const reloading = useRef(0);
+  useEffect(() => () => { revision.current++; }, []);
   async function reload() {
     const request = ++revision.current;
+    reloading.current++;
     try {
       const [nextBill, nextWallets] = await Promise.all([
         clientFetch<SplitBill>(`/split-bills/${bill.id}`, undefined, parseBill),
@@ -68,8 +71,10 @@ export function BillDetails({
       }
     } catch (err) {
       if (request === revision.current) setError((err as Error).message);
+    } finally {
+      reloading.current--;
     }
-    await monitor.refresh();
+    if (request === revision.current) await monitor.refresh();
   }
   useLiveSocket({
     onConnect: reload,
@@ -118,18 +123,27 @@ export function BillDetails({
   useEffect(() => {
     if (!paying) return;
     let stopped = false;
-    const timer = setInterval(() => {
-      clientFetch<SplitBill>(`/split-bills/${bill.id}`, undefined, parseBill)
-        .then((value) => {
-          if (!stopped) setBill(value);
-        })
-        .catch((err) => {
-          if (!stopped) setError((err as Error).message);
-        });
-    }, POLL_INTERVAL_MS);
+    let timer: ReturnType<typeof setTimeout>;
+    async function poll() {
+      // Фонове читання не випереджає оновлення рахунку та гаманців.
+      if (reloading.current === 0) {
+        const request = ++revision.current;
+        try {
+          const value = await clientFetch<SplitBill>(`/split-bills/${bill.id}`, undefined, parseBill);
+          if (!stopped && request === revision.current) {
+            setBill(value);
+            setError(null);
+          }
+        } catch (err) {
+          if (!stopped && request === revision.current) setError((err as Error).message);
+        }
+      }
+      if (!stopped) timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
+    }
+    timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
     return () => {
       stopped = true;
-      clearInterval(timer);
+      clearTimeout(timer);
     };
   }, [bill.id, paying]);
   async function accept() {

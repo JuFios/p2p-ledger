@@ -190,6 +190,25 @@ test('register preserves the BFF rejection status', async () => {
   const res = await request('/api/auth/register', post({}));
   assert.equal(res.status, 409);
 });
+test('logout preserves the browser origin behind a proxy and clears both cookies', async () => {
+  const origin = 'http://public.example:7443';
+  const res = await new Promise((resolve, reject) => {
+    const req = http.request(`${base}/api/auth/logout`, {
+      method: 'POST', headers: { Origin: origin, Host: 'public.example:7443',
+        'X-Forwarded-Host': 'untrusted.example:9999', Cookie: `accessToken=${valid}` },
+    }, response => {
+      response.resume();
+      response.once('end', () => resolve(response));
+    });
+    req.once('error', reject);
+    req.end();
+  });
+  assert.equal(res.statusCode, 303);
+  assert.equal(new URL(res.headers.location, origin).href, `${origin}/login`);
+  for (const name of ['accessToken', 'refreshToken']) {
+    assert(res.headers['set-cookie'].some(cookie => cookie.startsWith(`${name}=;`)));
+  }
+});
 test('server rendering uses the access cookie and BFF wallet data', async () => {
   const res = await request('/wallets');
   assert.equal(res.status, 200);
