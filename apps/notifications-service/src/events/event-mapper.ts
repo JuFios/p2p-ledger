@@ -103,7 +103,8 @@ export function mapEvent(event: IntegrationEvent): {
       const total = money(balanceAfter.available) + money(balanceAfter.held);
       if (!['USD', 'EUR', 'UAH'].includes(String(wallet.currency)))
         throw new Error('Invalid currency');
-      pushes.push({
+      // Lifecycle-події збережено, баланс змінюють тільки грошові події.
+      if (event.type !== 'TransferInitiated' && event.type !== 'TransferFailed') pushes.push({
         userId: ownerId,
         event: 'wallet.balance',
         payload: {
