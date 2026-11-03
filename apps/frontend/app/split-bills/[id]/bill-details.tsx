@@ -10,7 +10,10 @@ import {
   writeAttempt,
 } from '@/lib/attempt-storage';
 import { ApiError, clientFetch, isDefinitiveRejection } from '@/lib/http';
-import { parseBill, parseList, parseTransfer, parseWallet, isFinal, SplitBill, Transfer, Wallet } from '@/lib/types';
+import {
+  BILL_STATUSES, SHARE_STATUSES, parseBill, parseList, parseTransfer, parseWallet,
+  isFinal, hasKnownBillState, hasKnownTransferState, SplitBill, Transfer, Wallet,
+} from '@/lib/types';
 import { useLiveSocket } from '@/lib/use-live-socket';
 import { useTransfer } from '@/lib/use-transfer';
 import {
@@ -22,7 +25,7 @@ import {
   PageHeading,
 } from '@/components/ui/index';
 import { CopyId } from '@/components/ui/copy-id';
-import { money, statusLabels } from '@/lib/format';
+import { money, statusLabel } from '@/lib/format';
 import { TransferProgress } from '@/components/transfer-progress';
 import { acceptShare } from '../actions';
 
@@ -75,6 +78,8 @@ export function BillDetails({
       void reload();
     },
   });
+  const knownState = hasKnownBillState(bill) &&
+    (!monitor.transfer || hasKnownTransferState(monitor.transfer));
   const own = bill.shares.find((share) => share.participantEmail === email);
   const scope = attemptScope(userId, `split-pay:${bill.id}:${own?.id ?? ''}`);
   useEffect(() => {
@@ -126,7 +131,7 @@ export function BillDetails({
     };
   }, [bill.id, paying]);
   async function accept() {
-    if (!own || busy) return;
+    if (!own || busy || !knownState) return;
     setBusy(true);
     setError(null);
     try {
@@ -143,7 +148,7 @@ export function BillDetails({
   }
   async function pay(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!own || busy) return;
+    if (!own || busy || !knownState) return;
     attempt.current ??= {
       key: crypto.randomUUID(),
       shareId: own.id,
@@ -199,6 +204,11 @@ export function BillDetails({
           </Button>
         }
       />
+      {!knownState && (
+        <Alert tone="caution">
+          Сервіс повернув новий стан. Оплату й підтвердження вимкнено; оновіть рахунок пізніше.
+        </Alert>
+      )}
       {(error || monitor.error) && (
         <Alert
           action={
@@ -222,7 +232,7 @@ export function BillDetails({
                 </p>
               </div>
               <Badge tone={bill.status === 'SETTLED' ? 'positive' : 'info'}>
-                {statusLabels[bill.status] ?? bill.status}
+                {statusLabel(bill.status, BILL_STATUSES)}
               </Badge>
             </div>
             <p className="muted mb-3 mt-6">
@@ -289,11 +299,11 @@ export function BillDetails({
                           : 'neutral'
                     }
                   >
-                    {statusLabels[share.status] ?? share.status}
+                    {statusLabel(share.status, SHARE_STATUSES)}
                   </Badge>
                   {share.id === own?.id && own.status === 'PENDING' && (
                     <Button
-                      disabled={busy}
+                      disabled={busy || !knownState}
                       loading={busy}
                       onClick={() => void accept()}
                     >
@@ -335,7 +345,7 @@ export function BillDetails({
                     className="mt-5 w-full"
                     loading={busy}
                     disabled={
-                      busy ||
+                      !knownState || busy ||
                       (!attempt.current && !choices.length) ||
                       !!monitor.transfer
                     }

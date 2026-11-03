@@ -18,10 +18,12 @@ export interface Wallet {
   held: string;
   frozen: boolean;
 }
+type RemoteState<T extends string> = T | (string & { readonly unknownState: unique symbol });
+
 export interface Transfer {
   id: string;
-  status: TransferStatus;
-  step: TransferStep;
+  status: RemoteState<TransferStatus>;
+  step: RemoteState<TransferStep>;
   amount: string;
   currency: Currency;
   toAmount: string | null;
@@ -61,7 +63,7 @@ export interface SplitShare {
   id: string;
   participantEmail: string;
   amount: string;
-  status: ShareStatus;
+  status: RemoteState<ShareStatus>;
 }
 export interface SplitBill {
   id: string;
@@ -71,11 +73,28 @@ export interface SplitBill {
   currency: Currency;
   mode: SplitMode;
   dueAt: string | null;
-  status: BillStatus;
+  status: RemoteState<BillStatus>;
   shares: SplitShare[];
 }
-export function isFinal(transfer: Pick<Transfer, 'status'>) {
-  return transfer.status === 'COMPLETED' || transfer.status === 'FAILED';
+export function isFinal(transfer: Pick<Transfer, 'status' | 'step'>) {
+  return (transfer.status === 'COMPLETED' || transfer.status === 'FAILED') &&
+    (TRANSFER_STEPS as readonly string[]).includes(transfer.step);
+}
+
+export function hasKnownTransferState(transfer: Transfer) {
+  return (TRANSFER_STATUSES as readonly string[]).includes(transfer.status) &&
+    (TRANSFER_STEPS as readonly string[]).includes(transfer.step);
+}
+
+export function hasKnownBillState(bill: SplitBill) {
+  return (BILL_STATUSES as readonly string[]).includes(bill.status) &&
+    bill.shares.every(share => (SHARE_STATUSES as readonly string[]).includes(share.status));
+}
+
+function remoteState(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error('Сервіс повернув некоректний стан. Спробуйте пізніше.');
+  }
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -99,8 +118,8 @@ export function parseWallet(value: unknown): Wallet {
 
 export function parseTransfer(value: unknown): Transfer {
   const item = record(value);
-  known(item.status, TRANSFER_STATUSES);
-  known(item.step, TRANSFER_STEPS);
+  remoteState(item.status);
+  remoteState(item.step);
   known(item.currency, CURRENCIES);
   known(item.toCurrency, CURRENCIES);
   return item as unknown as Transfer;
@@ -108,11 +127,11 @@ export function parseTransfer(value: unknown): Transfer {
 
 export function parseBill(value: unknown): SplitBill {
   const item = record(value);
-  known(item.status, BILL_STATUSES);
+  remoteState(item.status);
   known(item.mode, SPLIT_MODES);
   known(item.currency, CURRENCIES);
   parseList(share => {
-    known(record(share).status, SHARE_STATUSES);
+    remoteState(record(share).status);
     return share;
   })(item.shares);
   return item as unknown as SplitBill;

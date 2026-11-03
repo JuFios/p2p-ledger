@@ -19,6 +19,11 @@ export const statusLabels: Record<TransferStatus | ShareStatus | BillStatus, str
   PARTIALLY_PAID: 'Частково сплачено',
   SETTLED: 'Рахунок закрито',
 };
+export function statusLabel(status: string, allowed: readonly string[] = Object.keys(statusLabels)) {
+  return allowed.includes(status) && Object.hasOwn(statusLabels, status)
+    ? statusLabels[status as keyof typeof statusLabels]
+    : status;
+}
 export function failureLabel(reason: string) {
   return (
     (
