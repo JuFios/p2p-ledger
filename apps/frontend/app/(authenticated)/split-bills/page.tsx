@@ -1,8 +1,9 @@
+import { LocalTime } from '@/components/local-time';
 import { sessionClaims } from '@/lib/session';
 import { cookies } from 'next/headers';
 import { bffFetch } from '@/lib/api';
 import { parseBill, parseList, SplitBill } from '@/lib/types';
-import { dateLabel, money, statusLabels } from '@/lib/format';
+import { money, statusLabels } from '@/lib/format';
 import { Badge, Card, EmptyState, PageHeading } from '@/components/ui/index';
 import { CreateBillForm } from '@/app/split-bills/create-form';
 export default async function SplitBillsPage() {
@@ -84,7 +85,7 @@ export default async function SplitBillsPage() {
                       className={overdue ? 'font-medium text-negative' : ''}
                     >
                       {overdue ? 'Прострочено · ' : 'До '}
-                      {dateLabel(bill.dueAt)}
+                      <LocalTime value={bill.dueAt} format="datetime" />
                     </span>
                   )}
                 </div>

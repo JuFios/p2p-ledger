@@ -82,7 +82,7 @@ test('split payment explicitly parses its transfer response', async (t) => {
   assert.deepEqual(await clientFetch('/split-bills/bill/shares/share/pay', undefined, parseTransfer), transfer);
 });
 
-test('BillDetails hydrates the same due date from UTC into a Kyiv browser', async () => {
+test('BillDetails hydrates UTC markup then displays the browser due date', async () => {
   const { renderToString } = require('react-dom/server');
   const { hydrateRoot } = require('react-dom/client');
   const { BillDetails } = loadSource('app/split-bills/[id]/bill-details.tsx', {
@@ -101,13 +101,14 @@ test('BillDetails hydrates the same due date from UTC into a Kyiv browser', asyn
     const container = document.getElementById('root');
     container.innerHTML = renderToString(element);
     const serverText = container.textContent;
-    process.env.TZ = 'Europe/Kyiv';
+    process.env.TZ = 'Europe/Berlin';
     await act(async () => {
       root = hydrateRoot(container, element, { onRecoverableError: error => errors.push(error.message) });
     });
     assert.deepEqual(errors, []);
-    assert.equal(container.textContent, serverText);
-    assert.match(serverText, /2 січ/);
+    assert.match(serverText, /1 січ/);
+    assert.match(container.textContent, /2 січ/);
+    assert.notEqual(container.textContent, serverText);
   } finally {
     if (root) await act(async () => root.unmount());
     if (previous === undefined) delete process.env.TZ;

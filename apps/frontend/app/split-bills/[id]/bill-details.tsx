@@ -1,5 +1,7 @@
 'use client';
 
+import { LocalTime } from '@/components/local-time';
+
 import { useEffect, useRef, useState } from 'react';
 import {
   attemptScope,
@@ -20,7 +22,7 @@ import {
   PageHeading,
 } from '@/components/ui/index';
 import { CopyId } from '@/components/ui/copy-id';
-import { dateLabel, money, statusLabels } from '@/lib/format';
+import { money, statusLabels } from '@/lib/format';
 import { TransferProgress } from '@/components/transfer-progress';
 import { acceptShare } from '../actions';
 
@@ -246,7 +248,7 @@ export function BillDetails({
                 className={`mt-4 text-sm ${overdue ? 'text-negative' : 'text-muted'}`}
               >
                 {overdue ? 'Прострочено · ' : 'Сплатити до: '}
-                {dateLabel(bill.dueAt)}
+                <LocalTime value={bill.dueAt} format="datetime" />
               </p>
             )}
             <CopyId value={bill.id} />
