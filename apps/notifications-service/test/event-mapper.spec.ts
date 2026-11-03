@@ -174,3 +174,15 @@ it('emits one balance update per hold or release while retaining lifecycle event
     expect(mapped.flatMap(value => value.activities)).toHaveLength(0);
   }
 });
+
+it.each(['TransferInitiated', 'TransferFailed'])(
+  'still validates the wallet payload of %s although it emits no balance update',
+  (type) => {
+    expect(() =>
+      mapEvent(event(type, { ...wallet(alice), currency: 'XXX' })),
+    ).toThrow('Invalid currency');
+    expect(() =>
+      mapEvent(event(type, wallet(randomUUID()))),
+    ).toThrow('Wallet owner missing from userIds');
+  },
+);
