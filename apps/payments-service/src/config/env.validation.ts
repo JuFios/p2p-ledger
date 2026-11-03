@@ -1,4 +1,3 @@
-import { validateRequiredConfig } from './config-policy';
 import { plainToInstance } from 'class-transformer';
 import {
   IsIn,
@@ -14,6 +13,7 @@ import {
   validateSync,
 } from 'class-validator';
 import { SUPPORTED_CURRENCIES } from '../common/currencies';
+import { validateRequiredConfig } from './config-policy';
 
 // Змінні оточення payments-service. Без обов'язкових сервіс не стартує;
 // решта має значення за замовчуванням. Типи вказано явно: за ними
@@ -166,7 +166,15 @@ export function parseFxRates(json: string): Record<string, number> {
 
 // Валідація env на старті (ConfigModule.forRoot({ validate })).
 export function validate(config: Record<string, unknown>) {
-  validateRequiredConfig(config, ['JWT_ACCESS_SECRET', 'DATABASE_HOST', 'DATABASE_USER', 'DATABASE_PASSWORD', 'DATABASE_NAME', 'REDIS_HOST', 'INTERNAL_API_TOKEN']);
+  validateRequiredConfig(config, [
+    'JWT_ACCESS_SECRET',
+    'DATABASE_HOST',
+    'DATABASE_USER',
+    'DATABASE_PASSWORD',
+    'DATABASE_NAME',
+    'REDIS_HOST',
+    'INTERNAL_API_TOKEN',
+  ]);
   const validated = plainToInstance(EnvironmentVariables, config, {
     enableImplicitConversion: true,
   });

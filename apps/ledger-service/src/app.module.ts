@@ -12,6 +12,7 @@ import { OutboxModule } from './outbox/outbox.module';
 import { ObservabilityModule } from './observability/observability.module';
 import { entities, migrations } from './data-source';
 import { validate } from './config/env.validation';
+import { readDatabaseEnvironment } from './config/runtime-env';
 
 @Module({
   imports: [
@@ -19,11 +20,7 @@ import { validate } from './config/env.validation';
     ObservabilityModule,
     TypeOrmModule.forRoot({
       type: 'postgres',
-      host: process.env.DATABASE_HOST,
-      port: Number(process.env.DATABASE_PORT ?? 5432),
-      username: process.env.DATABASE_USER,
-      password: process.env.DATABASE_PASSWORD,
-      database: process.env.DATABASE_NAME,
+      ...readDatabaseEnvironment(),
       entities,
       // Схема — лише міграціями (src/migrations), застосовуються на старті.
       synchronize: false,

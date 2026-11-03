@@ -1,6 +1,17 @@
-import { validateRequiredConfig } from './config-policy';
 import { plainToInstance } from 'class-transformer';
-import { IsEmail, IsIn, IsInt, IsNotEmpty, IsString, IsUrl, Matches, Max, Min, validateSync } from 'class-validator';
+import {
+  IsEmail,
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsString,
+  IsUrl,
+  Matches,
+  Max,
+  Min,
+  validateSync,
+} from 'class-validator';
+import { validateRequiredConfig } from './config-policy';
 
 export class EnvironmentVariables {
   @IsInt()
@@ -97,8 +108,20 @@ export class EnvironmentVariables {
 }
 
 export function validate(config: Record<string, unknown>) {
-  validateRequiredConfig(config, ['JWT_ACCESS_SECRET', 'DATABASE_HOST', 'DATABASE_USER', 'DATABASE_PASSWORD', 'DATABASE_NAME', 'REDIS_HOST', 'INTERNAL_API_TOKEN', 'JWT_REFRESH_SECRET', 'ADMIN_PASSWORD']);
-  const validated = plainToInstance(EnvironmentVariables, config, { enableImplicitConversion: true });
+  validateRequiredConfig(config, [
+    'JWT_ACCESS_SECRET',
+    'DATABASE_HOST',
+    'DATABASE_USER',
+    'DATABASE_PASSWORD',
+    'DATABASE_NAME',
+    'REDIS_HOST',
+    'INTERNAL_API_TOKEN',
+    'JWT_REFRESH_SECRET',
+    'ADMIN_PASSWORD',
+  ], ['ADMIN_PASSWORD']);
+  const validated = plainToInstance(EnvironmentVariables, config, {
+    enableImplicitConversion: true,
+  });
   const errors = validateSync(validated, { skipMissingProperties: false });
   if (errors.length) throw new Error(errors.toString());
   return validated;

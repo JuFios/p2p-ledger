@@ -1,4 +1,3 @@
-import { validateRequiredConfig } from './config-policy';
 import { plainToInstance } from 'class-transformer';
 import {
   IsIn,
@@ -10,6 +9,7 @@ import {
   Min,
   validateSync,
 } from 'class-validator';
+import { validateRequiredConfig } from './config-policy';
 
 class EnvironmentVariables {
   @IsInt()
@@ -67,7 +67,9 @@ class EnvironmentVariables {
 }
 
 export function validate(config: Record<string, unknown>) {
-  validateRequiredConfig(config, ['JWT_ACCESS_SECRET']);
+  validateRequiredConfig(config, [
+    'JWT_ACCESS_SECRET',
+  ]);
   const env = plainToInstance(EnvironmentVariables, config, {
     enableImplicitConversion: true,
   });
