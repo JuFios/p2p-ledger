@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
       });
     } catch {}
   }
-  const res = NextResponse.redirect(new URL('/login', req.url), 303);
+  const res = new NextResponse(null, { status: 303, headers: { Location: '/login' } });
   res.cookies.delete('accessToken');
   res.cookies.delete('refreshToken');
   res.headers.set('Cache-Control', 'no-store');

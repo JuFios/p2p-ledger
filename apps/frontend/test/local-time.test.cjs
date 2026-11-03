@@ -77,6 +77,8 @@ test('calendar submits inclusive local days as UTC boundaries and restores the s
       ['America/New_York', '2030-11-03', '2030-11-03T04:00:00.000Z', '2030-11-04T05:00:00.000Z'],
       ['UTC', '2030-12-31', '2030-12-31T00:00:00.000Z', '2031-01-01T00:00:00.000Z'],
       ['Asia/Tokyo', '2030-02-01', '2030-01-31T15:00:00.000Z', '2030-02-01T15:00:00.000Z'],
+      ['America/Santiago', '2026-09-06', '2026-09-06T04:00:00.000Z', '2026-09-07T03:00:00.000Z'],
+      ['America/Santiago', '2026-04-04', '2026-04-04T03:00:00.000Z', '2026-04-05T04:00:00.000Z'],
     ]) {
       process.env.TZ = zone;
       let destination;
@@ -99,6 +101,21 @@ test('calendar submits inclusive local days as UTC boundaries and restores the s
         await act(async () => document.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
         assert.equal(destination, '/admin?walletId=wallet');
       } finally { await act(async () => root.unmount()); }
+    }
+  } finally { restoreZone(previous); }
+});
+
+test('calendar boundary arithmetic preserves early years and leap days', () => {
+  const previous = process.env.TZ;
+  try {
+    process.env.TZ = 'UTC';
+    const { periodBoundary } = loadSource('app/admin/period-filter.tsx');
+    for (const [day, start, end] of [
+      ['0099-12-31', '0099-12-31T00:00:00.000Z', '0100-01-01T00:00:00.000Z'],
+      ['0000-02-29', '0000-02-29T00:00:00.000Z', '0000-03-01T00:00:00.000Z'],
+    ]) {
+      assert.equal(periodBoundary(day), start);
+      assert.equal(periodBoundary(day, true), end);
     }
   } finally { restoreZone(previous); }
 });

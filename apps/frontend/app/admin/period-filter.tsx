@@ -6,9 +6,9 @@ import { useLocalTime } from '@/components/local-time';
 
 export function periodBoundary(day: string, inclusiveEnd = false) {
   const [year, month, date] = day.split('-').map(Number);
-  const boundary = new Date(year, month - 1, date);
-  if (year < 100) boundary.setFullYear(year, month - 1, date);
-  if (inclusiveEnd) boundary.setDate(boundary.getDate() + 1);
+  const boundaryDay = date + (inclusiveEnd ? 1 : 0);
+  const boundary = new Date(year, month - 1, boundaryDay);
+  if (year < 100) boundary.setFullYear(year, month - 1, boundaryDay);
   return boundary.toISOString();
 }
 
