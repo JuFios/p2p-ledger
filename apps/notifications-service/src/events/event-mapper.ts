@@ -1,6 +1,6 @@
-import { SUPPORTED_CURRENCIES } from '../common/currencies';
 import { isUUID } from 'class-validator';
 import { ActivityType } from '../activity/activity.entity';
+import { SUPPORTED_CURRENCIES } from '../common/currencies';
 
 export interface IntegrationEvent {
   eventId: string;
@@ -23,7 +23,7 @@ export interface ActivityDraft {
   type: ActivityType;
   payload: Record<string, unknown>;
 }
-export const LEDGER_TYPES = [
+const LEDGER_TYPES = [
   'MoneyDeposited',
   'MoneyWithdrawn',
   'TransferInitiated',
@@ -34,14 +34,14 @@ export const LEDGER_TYPES = [
 ];
 const BALANCE_NEUTRAL_EVENTS = new Set(['TransferInitiated', 'TransferFailed']);
 
-export const PAYMENT_TYPES = [
+const PAYMENT_TYPES = [
   'TransferStatusChanged',
   'SplitBillCreated',
   'SplitShareOverdue',
 ];
 export const KNOWN_TYPES = [...LEDGER_TYPES, ...PAYMENT_TYPES];
 
-export function record(value: unknown): Record<string, unknown> {
+function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error('Invalid object');
   return value as Record<string, unknown>;
@@ -56,26 +56,75 @@ function money(value: unknown): bigint {
     throw new Error('Invalid money');
   return BigInt(value.replace('.', ''));
 }
+const MAX_EVENT_POSITION = 9223372036854775807n;
+const TRANSFER_STATUSES = [
+  'PENDING',
+  'PROCESSING',
+  'AWAITING_RETRY',
+  'COMPENSATING',
+  'COMPLETED',
+  'FAILED',
+];
+
+function validPosition(value: unknown) {
+  if (value === undefined) return true;
+  return typeof value === 'string' && /^[1-9]\d{0,18}$/.test(value) &&
+    BigInt(value) <= MAX_EVENT_POSITION;
+}
+
 export function parseEnvelope(raw: string): IntegrationEvent {
   const event = record(JSON.parse(raw));
   uuid(event.eventId);
-  if (event.position !== undefined &&
-      (typeof event.position !== 'string' || !/^[1-9]\d{0,18}$/.test(event.position) ||
-       BigInt(event.position) > 9223372036854775807n))
+  if (!validPosition(event.position)) {
     throw new Error('Invalid event position');
-  if (
-    typeof event.type !== 'string' ||
-    !Number.isInteger(event.version) ||
-    Number(event.version) < 1 ||
-    typeof event.occurredAt !== 'string' ||
-    !Number.isFinite(Date.parse(event.occurredAt)) ||
-    !['ledger-service', 'payments-service'].includes(String(event.producer)) ||
-    !Array.isArray(event.userIds)
-  )
+  }
+  const validVersion = Number.isInteger(event.version) && Number(event.version) >= 1;
+  const validTime = typeof event.occurredAt === 'string' &&
+    Number.isFinite(Date.parse(event.occurredAt));
+  const validProducer = ['ledger-service', 'payments-service'].includes(String(event.producer));
+  const validEnvelope = typeof event.type === 'string' && validVersion &&
+    validTime && validProducer;
+  if (!validEnvelope || !Array.isArray(event.userIds)) {
     throw new Error('Invalid envelope');
+  }
   event.userIds.forEach(uuid);
   record(event.payload);
   return event as unknown as IntegrationEvent;
+}
+
+function mapWalletBalances(event: IntegrationEvent, users: string[]): Push[] {
+  const payload = event.payload;
+  const pushes: Push[] = [];
+  // Lifecycle-події валідуються, але не створюють push: їхній знімок
+  // дублює HoldPlaced/HoldReleased.
+  const emitsBalance = !BALANCE_NEUTRAL_EVENTS.has(event.type);
+  const wallets =
+    event.type === 'TransferCompleted'
+      ? [record(payload.from), record(payload.to)]
+      : [payload];
+  for (const wallet of wallets) {
+    const ownerId = uuid(wallet.ownerId);
+    if (!users.includes(ownerId))
+      throw new Error('Wallet owner missing from userIds');
+    const balanceAfter = record(wallet.balanceAfter);
+    const total = money(balanceAfter.available) + money(balanceAfter.held);
+    const knownCurrency = SUPPORTED_CURRENCIES.some(currency => currency === wallet.currency);
+    if (!knownCurrency)
+      throw new Error('Invalid currency');
+    if (emitsBalance)
+      pushes.push({
+        userId: ownerId,
+        event: 'wallet.balance',
+        payload: {
+          walletId: uuid(wallet.walletId),
+          currency: wallet.currency,
+          balance: `${total / 100n}.${(total % 100n).toString().padStart(2, '0')}`,
+          available: balanceAfter.available,
+          held: balanceAfter.held,
+        },
+      });
+  }
+  return pushes;
 }
 
 export function mapEvent(event: IntegrationEvent): {
@@ -94,34 +143,7 @@ export function mapEvent(event: IntegrationEvent): {
   if (LEDGER_TYPES.includes(event.type)) {
     if (event.producer !== 'ledger-service')
       throw new Error('Invalid producer');
-    // Lifecycle-події валідуються, але не створюють push: їхній знімок
-    // дублює HoldPlaced/HoldReleased.
-    const emitsBalance = !BALANCE_NEUTRAL_EVENTS.has(event.type);
-    const wallets =
-      event.type === 'TransferCompleted'
-        ? [record(payload.from), record(payload.to)]
-        : [payload];
-    for (const wallet of wallets) {
-      const ownerId = uuid(wallet.ownerId);
-      if (!users.includes(ownerId))
-        throw new Error('Wallet owner missing from userIds');
-      const balanceAfter = record(wallet.balanceAfter);
-      const total = money(balanceAfter.available) + money(balanceAfter.held);
-      if (!SUPPORTED_CURRENCIES.some((currency) => currency === wallet.currency))
-        throw new Error('Invalid currency');
-      if (emitsBalance)
-        pushes.push({
-          userId: ownerId,
-          event: 'wallet.balance',
-          payload: {
-            walletId: uuid(wallet.walletId),
-            currency: wallet.currency,
-            balance: `${total / 100n}.${(total % 100n).toString().padStart(2, '0')}`,
-            available: balanceAfter.available,
-            held: balanceAfter.held,
-          },
-        });
-    }
+    pushes.push(...mapWalletBalances(event, users));
     if (event.type === 'MoneyDeposited')
       activity(uuid(payload.ownerId), 'DEPOSIT');
     if (event.type === 'MoneyWithdrawn')
@@ -132,36 +154,29 @@ export function mapEvent(event: IntegrationEvent): {
     if (event.type === 'TransferStatusChanged') {
       uuid(payload.transferId);
       const sender = uuid(payload.senderUserId);
-      if (
-        ![
-          'PENDING',
-          'PROCESSING',
-          'AWAITING_RETRY',
-          'COMPENSATING',
-          'COMPLETED',
-          'FAILED',
-        ].includes(String(payload.status)) ||
-        typeof payload.step !== 'string'
-      )
+      const knownStatus = TRANSFER_STATUSES.includes(String(payload.status));
+      if (!knownStatus || typeof payload.step !== 'string') {
         throw new Error('Invalid transfer status');
+      }
       const recipients =
         payload.status === 'COMPLETED'
           ? [sender, uuid(payload.recipientUserId)]
           : [sender];
+      const update: Record<string, unknown> = {
+        transferId: payload.transferId,
+        status: payload.status,
+        step: payload.step,
+      };
+      if (payload.failureReason) {
+        update.failureReason = payload.failureReason;
+      }
       for (const userId of new Set(recipients)) {
         if (!users.includes(userId))
           throw new Error('Transfer recipient missing from userIds');
         pushes.push({
           userId,
           event: 'transfer.status',
-          payload: {
-            transferId: payload.transferId,
-            status: payload.status,
-            step: payload.step,
-            ...(payload.failureReason
-              ? { failureReason: payload.failureReason }
-              : {}),
-          },
+          payload: { ...update },
         });
       }
       if (payload.status === 'COMPLETED') {

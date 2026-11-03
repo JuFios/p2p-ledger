@@ -10,7 +10,6 @@ import { randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { AuthUser } from '../auth/jwt.strategy';
 import { blockedEmails } from '../common/blocked-emails';
-import { MAX_AMOUNT, isMoneyAmount } from '../common/is-money-amount';
 import { toMinor } from '../common/money';
 import { assertSameRequest, hashRequest } from '../common/request-hash';
 import { LedgerClient, LedgerUser } from '../ledger/ledger.client';
@@ -24,9 +23,9 @@ import { CreateSplitBillDto } from './dto/create-split-bill.dto';
 import { PayShareDto } from './dto/pay-share.dto';
 import { SplitBill } from './entities/split-bill.entity';
 import { SplitShare } from './entities/split-share.entity';
+import { SplitBillView, toSplitBillView } from './split-bill-view';
 import { splitBillCreated } from './split-events';
 import { splitEqually } from './split-math';
-import { SplitBillView, toSplitBillView } from './split-bill-view';
 
 export interface CreateSplitBillResult {
   created: boolean;
@@ -55,12 +54,6 @@ export class SplitBillsService {
     dto: CreateSplitBillDto,
     idempotencyKey?: string,
   ): Promise<CreateSplitBillResult> {
-    // Прямі виклики сервісу теж перевіряємо до hashOf: null інакше дає 500.
-    for (const participant of dto.participants) {
-      if (participant.amount !== undefined && !isMoneyAmount(participant.amount)) {
-        throw badRequest('INVALID_AMOUNT', `Сума учасника має бути додатним числом до ${MAX_AMOUNT} з не більше ніж двома знаками`);
-      }
-    }
     const requestHash = idempotencyKey ? this.hashOf(dto) : null;
     if (idempotencyKey) {
       const existing = await this.findByKey(
@@ -373,7 +366,10 @@ export class SplitBillsService {
       return null;
     }
     if (given.some((amount) => amount === undefined)) {
-      throw badRequest('AMOUNT_REQUIRED', 'У режимі CUSTOM потрібна сума кожного учасника');
+      throw badRequest(
+        'AMOUNT_REQUIRED',
+        'У режимі CUSTOM потрібна сума кожного учасника',
+      );
     }
     const amounts = given.map((amount) => toMinor(amount as number));
     if (amounts.reduce((sum, amount) => sum + amount, 0n) !== totalMinor) {

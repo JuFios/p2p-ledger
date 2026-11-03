@@ -1,9 +1,25 @@
 import { SUPPORTED_CURRENCIES as CURRENCIES, Currency } from './currencies';
 export { CURRENCIES };
 export type { Currency };
-export const TRANSFER_STATUSES = ['PENDING', 'PROCESSING', 'AWAITING_RETRY', 'COMPENSATING', 'COMPLETED', 'FAILED'] as const;
+const TRANSFER_STATUSES = [
+  'PENDING',
+  'PROCESSING',
+  'AWAITING_RETRY',
+  'COMPENSATING',
+  'COMPLETED',
+  'FAILED',
+] as const;
 export type TransferStatus = (typeof TRANSFER_STATUSES)[number];
-export const TRANSFER_STEPS = ['RISK_CHECK', 'RESOLVE_RECIPIENT', 'FX_QUOTE', 'HOLD', 'CONFIRM', 'CAPTURE', 'RELEASE_HOLD', 'DONE'] as const;
+export const TRANSFER_STEPS = [
+  'RISK_CHECK',
+  'RESOLVE_RECIPIENT',
+  'FX_QUOTE',
+  'HOLD',
+  'CONFIRM',
+  'CAPTURE',
+  'RELEASE_HOLD',
+  'DONE',
+] as const;
 export type TransferStep = (typeof TRANSFER_STEPS)[number];
 export const SHARE_STATUSES = ['PENDING', 'ACCEPTED', 'PAYING', 'PAID'] as const;
 export type ShareStatus = (typeof SHARE_STATUSES)[number];
@@ -77,19 +93,24 @@ export interface SplitBill {
   status: RemoteState<BillStatus>;
   shares: SplitShare[];
 }
+function isKnown(value: unknown, allowed: readonly string[]) {
+  return typeof value === 'string' && allowed.includes(value);
+}
+
 export function isFinal(transfer: Pick<Transfer, 'status' | 'step'>) {
-  return (transfer.status === 'COMPLETED' || transfer.status === 'FAILED') &&
-    (TRANSFER_STEPS as readonly string[]).includes(transfer.step);
+  const finalStatus = transfer.status === 'COMPLETED' || transfer.status === 'FAILED';
+  return finalStatus && isKnown(transfer.step, TRANSFER_STEPS);
 }
 
 export function hasKnownTransferState(transfer: Transfer) {
-  return (TRANSFER_STATUSES as readonly string[]).includes(transfer.status) &&
-    (TRANSFER_STEPS as readonly string[]).includes(transfer.step);
+  const knownStatus = isKnown(transfer.status, TRANSFER_STATUSES);
+  const knownStep = isKnown(transfer.step, TRANSFER_STEPS);
+  return knownStatus && knownStep;
 }
 
 export function hasKnownBillState(bill: SplitBill) {
-  return (BILL_STATUSES as readonly string[]).includes(bill.status) &&
-    bill.shares.every(share => (SHARE_STATUSES as readonly string[]).includes(share.status));
+  const knownStatus = isKnown(bill.status, BILL_STATUSES);
+  return knownStatus && bill.shares.every(share => isKnown(share.status, SHARE_STATUSES));
 }
 
 function remoteState(value: unknown) {
@@ -106,7 +127,7 @@ function record(value: unknown): Record<string, unknown> {
 }
 
 function known(value: unknown, allowed: readonly string[]) {
-  if (typeof value !== 'string' || !allowed.includes(value)) {
+  if (!isKnown(value, allowed)) {
     throw new Error('Сервіс повернув невідомий стан. Оновіть сторінку або спробуйте пізніше.');
   }
 }
@@ -126,15 +147,18 @@ export function parseTransfer(value: unknown): Transfer {
   return item as unknown as Transfer;
 }
 
+function parseShare(value: unknown) {
+  const share = record(value);
+  remoteState(share.status);
+  return share;
+}
+
 export function parseBill(value: unknown): SplitBill {
   const item = record(value);
   remoteState(item.status);
   known(item.mode, SPLIT_MODES);
   known(item.currency, CURRENCIES);
-  parseList(share => {
-    remoteState(record(share).status);
-    return share;
-  })(item.shares);
+  parseList(parseShare)(item.shares);
   return item as unknown as SplitBill;
 }
 
@@ -150,14 +174,21 @@ export function parseList<T>(parse: (value: unknown) => T) {
 export function validTransferUpdate(value: unknown): value is TransferUpdate {
   if (!value || typeof value !== 'object') return false;
   const item = value as TransferUpdate;
-  return typeof item.transferId === 'string' &&
-    TRANSFER_STATUSES.includes(item.status) && TRANSFER_STEPS.includes(item.step);
+  const validId = typeof item.transferId === 'string';
+  const knownStatus = isKnown(item.status, TRANSFER_STATUSES);
+  const knownStep = isKnown(item.step, TRANSFER_STEPS);
+  return validId && knownStatus && knownStep;
+}
+
+function isFormattedAmount(value: unknown) {
+  return typeof value === 'string' && /^-?\d+\.\d{2}$/.test(value);
 }
 
 export function validWalletUpdate(value: unknown): value is WalletUpdate {
   if (!value || typeof value !== 'object') return false;
   const item = value as WalletUpdate;
-  return typeof item.walletId === 'string' && CURRENCIES.includes(item.currency) &&
-    [item.balance, item.available, item.held].every(amount =>
-      typeof amount === 'string' && /^-?\d+\.\d{2}$/.test(amount));
+  const validId = typeof item.walletId === 'string';
+  const knownCurrency = isKnown(item.currency, CURRENCIES);
+  const validAmounts = [item.balance, item.available, item.held].every(isFormattedAmount);
+  return validId && knownCurrency && validAmounts;
 }
