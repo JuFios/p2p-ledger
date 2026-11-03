@@ -26,3 +26,31 @@ test('date labels match across server and browser timezones at midnight and DST'
     else process.env.TZ = previous;
   }
 });
+
+test('relative day and time labels use Kyiv time regardless of runtime timezone', (t) => {
+  const { dayLabel, timeLabel } = loadSource('lib/format.ts');
+  const previous = process.env.TZ;
+  // [поточний момент, сьогодні, вчора, позавчора]: перший рядок — 00:30 за Києвом
+  // 31 березня (доба зі зміною часу), другий — 00:30 наступного дня.
+  const cases = [
+    ['2030-03-30T22:30:00Z', '2030-03-30T22:10:00Z', '2030-03-30T10:00:00Z', '2030-03-29T10:00:00Z'],
+    ['2030-03-31T21:30:00Z', '2030-03-31T21:10:00Z', '2030-03-31T10:00:00Z', '2030-03-30T10:00:00Z'],
+  ];
+  try {
+    for (const [now, today, yesterday, older] of cases) {
+      t.mock.timers.enable({ apis: ['Date'], now: new Date(now) });
+      for (const zone of ['UTC', 'Europe/Kyiv', 'America/Los_Angeles']) {
+        process.env.TZ = zone;
+        assert.equal(dayLabel(today), 'Сьогодні');
+        assert.equal(dayLabel(yesterday), 'Вчора');
+        assert.notEqual(dayLabel(older), 'Вчора');
+        assert.equal(timeLabel(today), '00:10');
+      }
+      t.mock.timers.reset();
+    }
+  } finally {
+    t.mock.timers.reset();
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
+});

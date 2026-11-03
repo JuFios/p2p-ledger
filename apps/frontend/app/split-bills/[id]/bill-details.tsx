@@ -1,6 +1,5 @@
 'use client';
 
-import { parseBill, parseList, parseTransfer, parseWallet, isFinal, SplitBill, Transfer, Wallet } from '@/lib/types';
 import { useEffect, useRef, useState } from 'react';
 import {
   attemptScope,
@@ -9,6 +8,7 @@ import {
   writeAttempt,
 } from '@/lib/attempt-storage';
 import { ApiError, clientFetch, isDefinitiveRejection } from '@/lib/http';
+import { parseBill, parseList, parseTransfer, parseWallet, isFinal, SplitBill, Transfer, Wallet } from '@/lib/types';
 import { useLiveSocket } from '@/lib/use-live-socket';
 import { useTransfer } from '@/lib/use-transfer';
 import {

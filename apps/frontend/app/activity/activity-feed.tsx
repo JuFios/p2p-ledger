@@ -11,7 +11,7 @@ import {
   EmptyState,
   Skeleton,
 } from '@/components/ui/index';
-import { dayLabel, failureLabel, money } from '@/lib/format';
+import { dayLabel, failureLabel, money, timeLabel } from '@/lib/format';
 
 const labels: Record<string, string> = {
   DEPOSIT: 'Поповнення',
@@ -201,10 +201,7 @@ export function ActivityFeed({
                       className="mt-1 block text-xs text-muted"
                       dateTime={item.createdAt}
                     >
-                      {new Date(item.createdAt).toLocaleTimeString('uk-UA', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
+                      {timeLabel(item.createdAt)}
                     </time>
                     {typeof item.payload.title === 'string' && (
                       <p className="muted mt-2 break-words">

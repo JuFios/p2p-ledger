@@ -1,8 +1,8 @@
-import { parseList, parseWallet, Wallet } from '@/lib/types';
 import { sessionClaims } from '@/lib/session';
 import { cookies } from 'next/headers';
 import { PageHeading } from '@/components/ui/index';
 import { bffFetch } from '@/lib/api';
+import { parseList, parseWallet, Wallet } from '@/lib/types';
 import { TransferForm } from '@/app/transfers/new/transfer-form';
 
 export default async function NewTransferPage() {

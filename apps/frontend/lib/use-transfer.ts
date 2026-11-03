@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientFetch } from './http';
-import { parseTransfer } from './types';
-import { isFinal, Transfer, TransferUpdate } from './types';
+import { isFinal, parseTransfer, Transfer, TransferUpdate } from './types';
 
 export function useTransfer() {
   const [transfer, setTransfer] = useState<Transfer | null>(null);

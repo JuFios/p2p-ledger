@@ -1,8 +1,8 @@
-import { parseBill, parseList, parseWallet, SplitBill, Wallet } from '@/lib/types';
 import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { ApiError, bffFetch } from '@/lib/api';
 import { sessionClaims } from '@/lib/session';
+import { parseBill, parseList, parseWallet, SplitBill, Wallet } from '@/lib/types';
 import { uuid } from '@/lib/validation';
 import { BillDetails } from '@/app/split-bills/[id]/bill-details';
 
