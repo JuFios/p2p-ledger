@@ -72,6 +72,14 @@ describe('Split-рахунки: створення, перегляд, підтв
     expect([...events[0].user_ids].sort()).toEqual([a.userId, b.userId, c.userId].sort());
   });
 
+  it.each([undefined, 'null-amount-key'])('CUSTOM null is rejected with key %s', async (key) => {
+    const owner = createUser(ledger);
+    const member = createUser(ledger);
+    await postSplitBill(app, owner.token, bill({ mode: 'CUSTOM', totalAmount: 1, participants: [{ email: member.email, amount: null }] }), key).expect(400);
+    const [{ n }] = await app.get(DataSource).query('SELECT count(*)::int AS n FROM split_bills WHERE creator_user_id = $1', [owner.userId]);
+    expect(n).toBe(0);
+  });
+
   it('CUSTOM: суми задає ініціатор; сума часток ≠ загальній → 400', async () => {
     const owner = createUser(ledger);
     const [a, b] = [createUser(ledger), createUser(ledger)];

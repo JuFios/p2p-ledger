@@ -30,6 +30,10 @@ describe('Admin (e2e)', () => {
     await app.close();
   });
 
+  it.each(['2026-W01', '20261103', '2026-02-31', '2026-366'])('rejects unsupported reconciliation date %s', async (from) => {
+    await request(app.getHttpServer()).get('/admin/reconciliation').query({ from }).set('Authorization', `Bearer ${admin}`).expect(400);
+  });
+
   it('користувач без ролі admin отримує 403, без токена — 401', async () => {
     const a = await account(app);
     const server = app.getHttpServer();

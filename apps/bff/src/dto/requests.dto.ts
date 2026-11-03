@@ -17,8 +17,11 @@ import {
   Min,
   MinLength,
   ValidateNested,
+  ValidateIf,
 } from 'class-validator';
 import { IsMoneyAmount } from '../common/is-money-amount';
+
+import { IsCalendarDate } from '../common/is-calendar-date';
 
 const CURRENCIES = ['USD', 'EUR', 'UAH'];
 export class LoginDto {
@@ -52,7 +55,7 @@ export class CreateTransferDto extends MoneyDto {
 export class SplitParticipantDto {
   @ApiProperty({ format: 'email' }) @IsEmail() email: string;
   @ApiPropertyOptional({ minimum: 0.01, maximum: 1000000 })
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsMoneyAmount()
   amount?: number;
 }
@@ -122,10 +125,10 @@ export class ActivityQuery extends LimitQuery {
 export class ReconciliationQuery {
   @ApiPropertyOptional({ format: 'date-time' })
   @IsOptional()
-  @IsISO8601()
+  @IsCalendarDate()
   from?: string;
   @ApiPropertyOptional({ format: 'date-time' })
   @IsOptional()
-  @IsISO8601()
+  @IsCalendarDate()
   to?: string;
 }

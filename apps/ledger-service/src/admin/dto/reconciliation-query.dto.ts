@@ -1,12 +1,14 @@
-import { IsISO8601, IsOptional } from 'class-validator';
+import { IsOptional } from 'class-validator';
+
+import { IsCalendarDate } from '../../common/is-calendar-date';
 
 // Період звірки [from, to); без меж — уся історія.
 export class ReconciliationQueryDto {
   @IsOptional()
-  @IsISO8601()
+  @IsCalendarDate()
   from?: string;
 
   @IsOptional()
-  @IsISO8601()
+  @IsCalendarDate()
   to?: string;
 }
