@@ -67,13 +67,18 @@ export function TransferForm({
     if (monitor.transfer && isFinal(monitor.transfer))
       clearAttempt(attemptScope(userId, `transfer:${walletId}`));
   }, [monitor.transfer, walletId, userId]);
+  const revision = useRef(0);
+  useEffect(() => () => { revision.current++; }, []);
   async function reload() {
+    const current = ++revision.current;
     try {
       const values = await clientFetch<Wallet[]>('/wallets');
+      if (current !== revision.current) return;
       setWallets(values);
       setWalletId((old) => old || values.find((w) => !w.frozen)?.id || '');
       setError(null);
     } catch (err) {
+      if (current !== revision.current) return;
       setError((err as Error).message);
     }
     await monitor.refresh();

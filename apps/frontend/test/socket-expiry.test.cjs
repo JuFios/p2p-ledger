@@ -52,9 +52,11 @@ test('server expiry reconnects with a fresh handshake and restores state on conn
   try {
     await act(async () => root.render(React.createElement(App)));
     assert.equal(reads, 1);
+    assert.equal(handshakes, 1);
     await act(async () => socket.emit('disconnect', 'io server disconnect'));
     await act(async () => t.mock.timers.tick(3000));
     assert.equal(reads, 2);
+    assert.equal(handshakes, 2);
     assert.notEqual(tokens[0], tokens[1]);
     assert.match(document.body.textContent, /online/);
   } finally {

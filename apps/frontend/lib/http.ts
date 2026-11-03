@@ -1,3 +1,4 @@
+import { validateApiState } from './types';
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -37,5 +38,7 @@ export async function clientFetch<T>(
     headers,
     cache: 'no-store',
   });
-  return readResponse<T>(res);
+  const value = await readResponse<T>(res);
+  validateApiState(path, value);
+  return value;
 }

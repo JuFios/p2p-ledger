@@ -1,3 +1,5 @@
+import { BillStatus, ShareStatus, TransferStatus } from './types';
+
 export function money(value: string | null | undefined) {
   if (value == null) return '—';
   const [whole, fraction] = value.split('.');
@@ -19,7 +21,7 @@ export function dayLabel(value: string) {
   if (date.toDateString() === yesterday.toDateString()) return 'Вчора';
   return dateLabel(value);
 }
-export const statusLabels: Record<string, string> = {
+export const statusLabels: Record<TransferStatus | ShareStatus | BillStatus, string> = {
   PENDING: 'Очікує',
   PROCESSING: 'Виконується',
   AWAITING_RETRY: 'Очікує повтору',

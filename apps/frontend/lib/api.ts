@@ -1,3 +1,5 @@
+import { validateApiState } from './types';
+import { httpBudget } from './http-budget';
 import { cookies } from 'next/headers';
 
 import { ApiError, readResponse } from './http';
@@ -24,11 +26,13 @@ export async function bffFetch<T>(
       ...init,
       headers,
       cache: 'no-store',
-      signal: init?.signal ?? AbortSignal.timeout(8000),
+      signal: init?.signal ?? AbortSignal.timeout(httpBudget(Number(process.env.CB_TIMEOUT_MS ?? 3000)).frontend),
       redirect: 'manual',
     });
   } catch {
     throw new ApiError(503, 'Сервіс тимчасово недоступний. Спробуйте ще раз.');
   }
-  return readResponse<T>(res);
+  const value = await readResponse<T>(res);
+  validateApiState(path, value);
+  return value;
 }

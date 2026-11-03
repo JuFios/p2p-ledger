@@ -9,7 +9,9 @@ export interface SessionClaims {
 export function sessionClaims(token?: string): SessionClaims | null {
   try {
     const part = token!.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    const value = JSON.parse(atob(part));
+    const value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(
+      Uint8Array.from(atob(part), (byte) => byte.charCodeAt(0)),
+    ));
     return typeof value.sub === 'string' && typeof value.exp === 'number'
       ? value
       : null;
