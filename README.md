@@ -345,7 +345,7 @@ notifications у фактичному стартері не було, попри
 | Що змінено | Навіщо |
 |---|---|
 | Ledger CRUD → event store, проєкції, міграції; User без Wallet relation | Double-entry, replay, незалежний auth-контекст. |
-| Auth: env, throttle, повний refresh hash, CAS-ротація, sid, logout | Безпечна конфігурація й відкликання сесії, включно з конкурентним refresh/logout. Новий login змінює sid; refresh зберігає. |
+| Auth: env, throttle, повний refresh hash, CAS-ротація, sid, logout | Безпечна конфігурація й відкликання сесії, включно з конкурентним refresh/logout. Новий login змінює sid; refresh зберігає. Конкурентний email → 409; інші помилки БД не маскуються. |
 | Payments-каркас → сага/split; DTO/JWT/TypeORM/scheduler | Реальні перекази, компенсація, оплати й нагадування. |
 | Notifications-заглушка → БД/activity/consumer/WS | Ідемпотентні сповіщення та real-time. |
 | Bootstrap/AppModule трьох backend | Ранній tracing, Pino, Swagger, валідація, health БД/Redis, завершення воркерів і SDK на SIGTERM. Redis down — деградація без зупинки ledger/REST activity. |
@@ -374,6 +374,10 @@ available/held/frozen. Витрати обмежені available, frozen бло�
 | Frontend persistence/client/parsers | Фікстури отримали userId, step, currency/toCurrency та явний парсер. Нові рядкові стани дозволені, malformed/missing/валюти лишаються строгими; ключі, polling і захист від старих відповідей збережені. |
 | Frontend format/BillDetails | UTC SSR → пояс браузера замість фіксованого поясу; перевірки hydration, DST і включного календаря. |
 | Payments split-validation | Два direct-call null тести проходять реальний ValidationPipe → сервіс: null відхиляється до hash/БД, з ключем і без. HTTP e2e збережено. |
+
+Регресійні тести охоплюють переставлені відповіді й помилки polling/live/manual,
+DST опівночі, logout за проксі та конкурентну реєстрацію на PostgreSQL.
+Для logout очікується відносний Location, для реєстрації — один акаунт, решта відповідей 409 та чинні login/refresh переможця.
 
 Технічні правила й шаблон relay мають одне джерело в `contracts/` та похідні
 копії в незалежних Docker build contexts. `node scripts/sync-contracts.cjs`
@@ -457,8 +461,8 @@ Logout відкликає sid і очищає cookie; уже виданий acce
 в httpOnly-cookie. Cookie: SameSite=Lax, Secure при HTTPS. У localStorage токенів немає.
 
 Connect/reconnect перечитує REST-стан; після JWT exp сокет перепідключається зі свіжим токеном.
-Статус переказу опитується послідовно, відповіді попереднього переказу відкидаються.
-Поки частка має статус PAYING, клієнт періодично перечитує рахунок.
+Фонове опитування переказу й PAYING-рахунку послідовне;
+спільна ревізія відкидає старі відповіді polling, ручних і live-оновлень.
 Ключ і snapshot незавершеної спроби живуть у sessionStorage вкладки з userId;
 мережеві/тимчасові 401/403/408/429/5xx повторюються тим самим ключем і тілом.
 Без доступу до сховища ключ лишається в пам’яті до reload.
@@ -468,8 +472,7 @@ Connect/reconnect перечитує REST-стан; після JWT exp соке�
 Дані/API/події — UTC. LocalTime дає однакові UTC SSR і першу гідрацію,
 потім відображає пояс браузера; групи «Сьогодні/Вчора» теж локальні.
 Календар звірки має включні дні «Від»/«До» та передає межі періоду в UTC.
-Інтерфейс використовує Tailwind і локальний Inter; є світла/темна тема
-та loading/empty/error/offline стани.
+Інтерфейс використовує Tailwind і локальний Inter; є світла/темна тема та loading/empty/error/offline стани.
 
 ## Обмеження та подальші зміни
 
