@@ -1,8 +1,24 @@
-FROM node:20-alpine AS base
+FROM node:20-alpine AS dependencies
 WORKDIR /app
 COPY package*.json ./
-RUN npm install
+RUN npm ci
+
+FROM dependencies AS test
 COPY . .
+
+FROM test AS build
 RUN npm run build
+
+FROM node:20-alpine AS production-dependencies
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev --omit=optional && npm cache clean --force
+
+FROM node:20-alpine AS runtime
+WORKDIR /app
+COPY --from=production-dependencies --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/dist ./dist
+COPY --chown=node:node package*.json ./
+USER node
 EXPOSE 3004
 CMD ["node", "dist/main"]

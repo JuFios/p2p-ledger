@@ -1,3 +1,4 @@
+import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { Repository } from 'typeorm';
 import { AuthService } from '../src/auth/auth.service';
@@ -137,6 +138,14 @@ describe('Refresh token rotation', () => {
     resume();
     await loggingOut;
     await expect(service.refresh(current.refreshToken)).resolves.toHaveProperty('accessToken');
+  });
+
+  it('requires a fresh login for legacy bcrypt hashes rather than reopening prefix replay', async () => {
+    const first = await service.register(credentials);
+    user!.refreshTokenHash = await bcrypt.hash(first.refreshToken, 10);
+    user!.refreshSessionId = null;
+    await expect(service.refresh(first.refreshToken)).rejects.toThrow('відкликано');
+    await expect(service.login(credentials)).resolves.toHaveProperty('refreshToken');
   });
 
 });
