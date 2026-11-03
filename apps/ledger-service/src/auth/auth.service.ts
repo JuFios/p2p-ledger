@@ -4,7 +4,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomUUID, timingSafeEqual } from 'crypto';
@@ -16,6 +16,8 @@ interface TokenPair {
   accessToken: string;
   refreshToken: string;
 }
+
+const EMAIL_UNIQUE_CONSTRAINT = 'UQ_97672ac88f789774dd47f7c8be3';
 
 @Injectable()
 export class AuthService {
@@ -30,9 +32,19 @@ export class AuthService {
       throw new ConflictException('Email вже зареєстровано');
     }
     const passwordHash = await bcrypt.hash(dto.password, 10);
-    const user = await this.users.save(
-      this.users.create({ email: dto.email, passwordHash }),
-    );
+    let user: User;
+    try {
+      user = await this.users.save(
+        this.users.create({ email: dto.email, passwordHash }),
+      );
+    } catch (error) {
+      if (error instanceof QueryFailedError) {
+        const cause = error.driverError as { code?: string; constraint?: string };
+        if (cause.code === '23505' && cause.constraint === EMAIL_UNIQUE_CONSTRAINT)
+          throw new ConflictException('Email вже зареєстровано');
+      }
+      throw error;
+    }
     return this.issueTokens(user);
   }
 
