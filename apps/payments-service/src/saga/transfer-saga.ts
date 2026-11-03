@@ -82,8 +82,12 @@ export function decide(
     failureReason: reason,
     continue: false,
   });
-  const holdMayExist =
+  const holdAlreadyPlaced =
     transfer.step === 'CONFIRM' || transfer.step === 'CAPTURE';
+
+  const holdMayHaveBeenPlaced = transfer.step === 'HOLD' || holdAlreadyPlaced;
+  const mustResolveOutcome =
+    transfer.step === 'CAPTURE' || transfer.step === 'RELEASE_HOLD';
 
   switch (result.type) {
     case 'next': {
@@ -110,15 +114,13 @@ export function decide(
     case 'compensated':
       return { ...base, status: 'FAILED', step: transfer.step, continue: false };
     case 'rejected':
-      return holdMayExist ? compensate(result.reason) : fail(result.reason);
+      return holdAlreadyPlaced ? compensate(result.reason) : fail(result.reason);
     case 'uncertain': {
       const attempts = transfer.attempts + 1;
-      const neverGiveUp =
-        transfer.step === 'CAPTURE' || transfer.step === 'RELEASE_HOLD';
-      if (!neverGiveUp && attempts >= settings.maxAttempts) {
+      if (!mustResolveOutcome && attempts >= settings.maxAttempts) {
         // Відповіді на HOLD так і не отримали — холд міг з'явитись, тож
         // знімаємо його (release неіснуючого холду поверне NOT_FOUND).
-        return transfer.step === 'HOLD' || holdMayExist
+        return holdMayHaveBeenPlaced
           ? compensate('RETRIES_EXHAUSTED')
           : fail('RETRIES_EXHAUSTED');
       }
