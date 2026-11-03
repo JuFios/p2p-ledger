@@ -1,3 +1,4 @@
+import { validateRequiredConfig } from './config-policy';
 import { plainToInstance } from 'class-transformer';
 import {
   IsIn,
@@ -66,6 +67,7 @@ export class EnvironmentVariables {
 }
 
 export function validate(config: Record<string, unknown>) {
+  validateRequiredConfig(config, ['JWT_ACCESS_SECRET', 'DATABASE_HOST', 'DATABASE_USER', 'DATABASE_PASSWORD', 'DATABASE_NAME', 'REDIS_HOST']);
   const validated = plainToInstance(EnvironmentVariables, config, {
     enableImplicitConversion: true,
   });

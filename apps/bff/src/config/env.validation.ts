@@ -1,3 +1,4 @@
+import { validateRequiredConfig } from './config-policy';
 import { plainToInstance } from 'class-transformer';
 import {
   IsIn,
@@ -11,6 +12,11 @@ import {
 } from 'class-validator';
 
 class EnvironmentVariables {
+  @IsInt()
+  @Min(1)
+  @Max(60000)
+  CB_TIMEOUT_MS: number = 3000;
+
   @IsString()
   @IsNotEmpty()
   OTEL_SERVICE_NAME: string = 'bff';
@@ -61,6 +67,7 @@ class EnvironmentVariables {
 }
 
 export function validate(config: Record<string, unknown>) {
+  validateRequiredConfig(config, ['JWT_ACCESS_SECRET']);
   const env = plainToInstance(EnvironmentVariables, config, {
     enableImplicitConversion: true,
   });
