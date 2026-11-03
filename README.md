@@ -145,7 +145,7 @@ flowchart TB
 |---|---|
 | PostgreSQL append-only event store | Подія, проводки, проєкція та outbox атомарні в наявній БД; окрема СУБД зайва для цього обсягу. Replay і версіонування реалізовані в коді. |
 | Redis Streams | Журнал доменних подій, consumer groups, ACK і reclaim в одному контейнері. Retention обмежений; retries, DLQ та передавання trace-контексту реалізовані явно. |
-| Оркестрована сага | Payments має одного власника стану, порядку й компенсації; простіше аудитувати та відновлювати фінансовий флоу. Потрібні стійкий стан і lease. |
+| Оркестрована сага | Payments має одного власника стану, порядку й компенсації; збережений стан дозволяє продовжити переказ після збою. Компроміс — окремий координатор зі сховищем стану та lease. |
 | REST BFF на NestJS | Єдина HTTP-точка, агрегація та Swagger для одного клієнта. Додає мережевий перехід; незалежні читання виконуються паралельно. |
 
 ## Модель узгодженості та облік
@@ -312,28 +312,28 @@ JSON-логи містять trace_id/span_id (null поза span), секрет
 
 ## Знайдені проблеми стартового коду
 
-| Проблема | Як виявити / відтворити | Тест або доказ | Виправлення |
+| Проблема | Як проявлялася | Тест / реалізація | Виправлення |
 |---|---|---|---|
 | Double spend / lost update | 20 паралельних withdraw(10) зі 100 проходять; паралельні deposit втрачають оновлення | [wallets-concurrency](apps/ledger-service/test/e2e/wallets-concurrency.e2e-spec.ts) | Транзакція, FOR UPDATE, bigint, event store та CHECK. |
 | IDOR гаманця | Користувач B читає/змінює гаманець A за ID | [wallets-access](apps/ledger-service/test/e2e/wallets-access.e2e-spec.ts) | Пошук за id + ownerId; чужий → 404. |
 | Невалідні ID та суми | Не-UUID, 0.001, надмірна сума; `1e-7` дає TypeError у штатному decimal-валідаторі | wallets-access, [money-contract](apps/ledger-service/test/money-contract.spec.ts) | ParseUUIDPipe та IsMoneyAmount з межами й точністю. |
 | «Зелений» тест овердрафту | Прибрати відмову withdraw: старий тест без await усе одно проходить | [wallets.service.spec.ts](apps/ledger-service/test/wallets.service.spec.ts), мутація | Await rejects, expect.assertions, перевірка відсутності запису. |
 | Гонка ensure гаманця | Паралельний findOne → save створює дублікати однієї валюти | wallets-concurrency | UNIQUE(owner_id, currency), INSERT ON CONFLICT. |
-| Гаманці UI завжди 401 | Вхід → /wallets; запит не містить Bearer із cookie | Ручне відтворення; [frontend HTTP](apps/frontend/test/http.test.cjs) | Серверний bffFetch передає токен, middleware оновлює access. |
+| Гаманці UI завжди 401 | Вхід → /wallets; запит не містить Bearer із cookie | [Frontend HTTP](apps/frontend/test/http.test.cjs) | Серверний bffFetch передає токен, middleware оновлює access. |
 | Payments без авторизації | Каркас приймає запити без JWT та власника | [transfers e2e](apps/payments-service/test/e2e/transfers.e2e-spec.ts) | JWT-guard, перевірка власності, отримувачу лише COMPLETED. |
 | Запасні JWT-секрети | Запустити ledger без обов’язкових env | [env-startup](apps/ledger-service/test/env-startup.spec.ts) | Fail-fast валідація, без fallback; сила секретів у production. |
 | Bcrypt обрізає refresh до 72 байтів | Різні JWT зі спільним префіксом відповідають одному хешу | [auth-rotation](apps/ledger-service/test/auth-rotation.spec.ts), [HTTP](apps/ledger-service/test/e2e/auth-rotation.e2e-spec.ts) | SHA-256 усього токена, timingSafeEqual, jti, атомарна ротація. Паролі лишаються bcrypt. |
-| ORM змішує auth/ledger | User ↔ Wallet зв’язує контексти | Огляд сутностей; wallets e2e | Лише ownerId без зв’язку з User, баланс — окрема проєкція. |
-| CI без lockfiles / tests | npm cache потребує lockfile; Jest payments без тестів завершується з кодом 1 | Перший CI-прогін | Lockfiles, npm ci, реальні suites без passWithNoTests. |
+| ORM змішує auth/ledger | User ↔ Wallet зв’язує контексти | [Wallet](apps/ledger-service/src/wallets/entities/wallet.entity.ts), [wallets e2e](apps/ledger-service/test/e2e/wallets.e2e-spec.ts) | Лише ownerId без зв’язку з User, баланс — окрема проєкція. |
+| CI без lockfiles / tests | npm cache потребує lockfile; Jest payments без тестів завершується з кодом 1 | [CI-конфігурація](.github/workflows/ci.yml) | Lockfiles, npm ci, реальні suites без passWithNoTests. |
 | Ledger не стартує з Postgres | Nullable union refreshTokenHash визначається як Object | `docker compose up --build` | Явний тип varchar колонки. |
-| Неправильний шлях build | test/ потрапляє у збірку, вихід dist/src/main замість dist/main | Збірка та запуск контейнера | tsconfig.build.json виключає тести. |
+| Неправильний шлях build | test/ потрапляє у збірку, вихід dist/src/main замість dist/main | [Конфігурація збірки](apps/ledger-service/tsconfig.build.json), [Dockerfile](apps/ledger-service/Dockerfile) | tsconfig.build.json виключає тести. |
 | Хостовий bcrypt в Linux-образі | COPY . . після локального install дає Exec format error | Docker build на macOS із хостовими node_modules | .dockerignore для node_modules/dist/.env. |
 
-Історичні пари «червоний тест → виправлення»:
+Коміти з regression-тестами та відповідними виправленнями:
 [конкурентні гроші](https://github.com/JuFios/p2p-ledger/commit/80a66d4367c525d9d17b2f11c0bd9e2e881fc725) → [блокування](https://github.com/JuFios/p2p-ledger/commit/4ba7c94df4afee3d6d60022e6972eff67850feea),
 [IDOR/суми](https://github.com/JuFios/p2p-ledger/commit/f374002077e22ba2b97367d2e0f2bea942fd0165) → [валідація й доступ](https://github.com/JuFios/p2p-ledger/commit/00728ee21cd78f4751dfa3d8ad83d24390c563f6),
 [decimal edge](https://github.com/JuFios/p2p-ledger/commit/24417a739aab63074382ccfe76c39983e062cc94) → [валідатор](https://github.com/JuFios/p2p-ledger/commit/7ba0722a5b4dd4f7f62ead6ce028eaab62e022a4).
-Для овердрафту доказ — [виправлення тесту з мутацією](https://github.com/JuFios/p2p-ledger/commit/f49cdbf4173d25c041fabf64dee2644159fd9a50).
+Для овердрафту — [виправлення асинхронних перевірок тесту](https://github.com/JuFios/p2p-ledger/commit/f49cdbf4173d25c041fabf64dee2644159fd9a50).
 
 ## Стартовий код і сумісність
 
@@ -413,10 +413,10 @@ Override прибирає host-порти, створює окремі томи/
 CI запускає service jobs на всіх push/PR, system-e2e — на PR і push у solution;
 при відмові друкує діагностику, тестові ресурси прибирає завжди.
 
-[Race-скрипт](tests/system/load/double-spend.ts): 50 одночасних переказів
-по 10 USD з балансу 100 USD, різні ключі. Зафіксований локальний результат
-2026-11-02: Docker Desktop, Linux arm64, Node 20.20.2, tracing/notifications
-увімкнені, dev-стек працював паралельно; 2135 мс, 23.42 фінальних операцій/с.
+[Race-скрипт](tests/system/load/double-spend.ts) запускає 50 одночасних переказів
+по 10 USD з балансу 100 USD, кожен із власним ключем. Приклад результату в Docker
+(Linux arm64, Node 20.20.2, tracing і notifications увімкнені):
+2135 мс, 23.42 фінальних операцій/с.
 
 | Результат | Значення |
 |---|---:|
@@ -457,7 +457,8 @@ Logout відкликає sid і очищає cookie; уже виданий acce
 в httpOnly-cookie. Cookie: SameSite=Lax, Secure при HTTPS. У localStorage токенів немає.
 
 Connect/reconnect перечитує REST-стан; після JWT exp сокет перепідключається зі свіжим токеном.
-Переказ і PAYING-частка опитуються послідовно; старі відповіді/unmount не змінюють стан.
+Статус переказу опитується послідовно, відповіді попереднього переказу відкидаються.
+Поки частка має статус PAYING, клієнт періодично перечитує рахунок.
 Ключ і snapshot незавершеної спроби живуть у sessionStorage вкладки з userId;
 мережеві/тимчасові 401/403/408/429/5xx повторюються тим самим ключем і тілом.
 Без доступу до сховища ключ лишається в пам’яті до reload.
@@ -466,22 +467,20 @@ Connect/reconnect перечитує REST-стан; після JWT exp соке�
 
 Дані/API/події — UTC. LocalTime дає однакові UTC SSR і першу гідрацію,
 потім відображає пояс браузера; групи «Сьогодні/Вчора» теж локальні.
-Календар звірки має включні дні «Від»/«До», перетворені на UTC-моменти початку першого
-та наступного після останнього дня з урахуванням DST. Інтерфейс має Tailwind,
-локальний Inter, світлу/темну тему, loading/empty/error/offline стани.
+Календар звірки має включні дні «Від»/«До» та передає межі періоду в UTC.
+Інтерфейс використовує Tailwind і локальний Inter; є світла/темна тема
+та loading/empty/error/offline стани.
 
 ## Обмеження та подальші зміни
 
 - Моки: FX з env, ліміт у номінальних одиницях усіх валют, чорний список,
   deposit/withdraw. Реальних котирувань, fraud-моделі й банківських рейок немає.
 - Версії Node 20 / Nest 10 / Next 14 збережено для сумісності стартера.
-  За аудитом 2026-11-03 лишилися backend moderate та frontend critical findings,
-  включно з [Server Actions DoS](https://github.com/advisories/GHSA-p3m5-59mp-jv5r)
-  і [upgrade SSRF](https://github.com/advisories/GHSA-c4j6-fc7j-m34r).
-  Сумісні виправлення внесено, але це не усуває всіх advisory; потрібні окрема
-  міграція підтримуваних версій та перевірка deployment. У поточному API немає
-  SSE/uploads/довільних glob-patterns; це оцінка досяжності, а не виправлення пакетів.
-  Dev toolchain теж має залишкові findings; runtime не містить ESLint/Jest/ts-node.
+  Next 14 має відомі вразливості
+  [Server Actions DoS](https://github.com/vercel/next.js/security/advisories/GHSA-p3m5-59mp-jv5r)
+  та [WebSocket upgrade SSRF](https://github.com/vercel/next.js/security/advisories/GHSA-c4j6-fc7j-m34r).
+  Перед публічним розгортанням потрібні оновлення залежностей і налаштування
+  reverse proxy та мережевого доступу до внутрішніх сервісів.
 - Redis AOF/том зберігають стріми між перезапусками, everysec допускає втрату
   останньої секунди при аварії. MAXLEN обрізає історію; після втрати Redis
   опублікований outbox автоматично не відтворюється. Потрібні backup/retention/replay.
