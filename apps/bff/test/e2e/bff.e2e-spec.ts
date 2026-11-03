@@ -496,3 +496,17 @@ it('validates the logout refresh token before calling ledger', async () => {
     .send({ refreshToken: 123 }).expect(400);
   expect(ledger.calls).toHaveLength(0);
 });
+
+
+it.each([undefined, 'null-amount-key'])('rejects null CUSTOM amount before upstream with key %s', async (key) => {
+  const count = payments.calls.length;
+  const call = request(app.getHttpServer()).post('/split-bills').set('Authorization', `Bearer ${token}`);
+  if (key) call.set('Idempotency-Key', key);
+  await call.send({ ...bill, mode: 'CUSTOM', participants: [{ email: 'bob@example.com', amount: null }] }).expect(400);
+  expect(payments.calls).toHaveLength(count);
+});
+it.each(['2026-W01', '20261103', '2026-02-31', '2026-366'])('rejects unsupported reconciliation date %s before upstream', async (from) => {
+  const count = ledger.calls.length;
+  await request(app.getHttpServer()).get('/admin/reconciliation').query({ from }).set('Authorization', `Bearer ${admin}`).expect(400);
+  expect(ledger.calls).toHaveLength(count);
+});

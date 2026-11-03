@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { ApiError, bffFetch } from '@/lib/api';
-import { CURRENCIES, SplitBill } from '@/lib/types';
+import { CURRENCIES, parseBill, SplitBill } from '@/lib/types';
 import { money, uuid } from '@/lib/validation';
 
 export async function createBill(
@@ -51,7 +51,7 @@ export async function createBill(
         participants,
         dueAt,
       }),
-    });
+    }, parseBill);
     revalidatePath('/split-bills');
     return { id: bill.id };
   } catch (err) {

@@ -8,7 +8,7 @@ import {
   writeAttempt,
 } from '@/lib/attempt-storage';
 import { ApiError, clientFetch, isDefinitiveRejection } from '@/lib/http';
-import { isFinal, SplitBill, Transfer, Wallet } from '@/lib/types';
+import { parseBill, parseList, parseTransfer, parseWallet, isFinal, SplitBill, Transfer, Wallet } from '@/lib/types';
 import { useLiveSocket } from '@/lib/use-live-socket';
 import { useTransfer } from '@/lib/use-transfer';
 import {
@@ -51,8 +51,8 @@ export function BillDetails({
     const request = ++revision.current;
     try {
       const [nextBill, nextWallets] = await Promise.all([
-        clientFetch<SplitBill>(`/split-bills/${bill.id}`),
-        clientFetch<Wallet[]>('/wallets'),
+        clientFetch<SplitBill>(`/split-bills/${bill.id}`, undefined, parseBill),
+        clientFetch<Wallet[]>('/wallets', undefined, parseList(parseWallet)),
       ]);
       if (request === revision.current) {
         setBill(nextBill);
@@ -110,7 +110,7 @@ export function BillDetails({
     if (!paying) return;
     let stopped = false;
     const timer = setInterval(() => {
-      clientFetch<SplitBill>(`/split-bills/${bill.id}`)
+      clientFetch<SplitBill>(`/split-bills/${bill.id}`, undefined, parseBill)
         .then((value) => {
           if (!stopped) setBill(value);
         })
@@ -161,6 +161,7 @@ export function BillDetails({
           headers: { 'Idempotency-Key': saved.key },
           body: saved.body,
         },
+        parseTransfer,
       );
       monitor.track(value);
       await reload();

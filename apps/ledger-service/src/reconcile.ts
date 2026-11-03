@@ -1,3 +1,4 @@
+import { isCalendarDate } from './common/is-calendar-date';
 import dataSource from './data-source';
 import { reconcile } from './admin/reconciliation';
 
@@ -10,7 +11,7 @@ function arg(name: string): Date | undefined {
     ?.slice(name.length + 3);
   if (raw === undefined) return undefined;
   const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) {
+  if (!isCalendarDate(raw)) {
     throw new Error(`Некоректна дата --${name}=${raw}`);
   }
   return date;

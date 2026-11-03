@@ -36,10 +36,8 @@ describe('Event mapping', () => {
   it.each([
     'MoneyDeposited',
     'MoneyWithdrawn',
-    'TransferInitiated',
     'HoldPlaced',
     'HoldReleased',
-    'TransferFailed',
   ])('maps %s to an exact wallet balance', (type) => {
     const mapped = mapEvent(event(type, wallet(alice)));
     expect(mapped.pushes).toEqual([
@@ -168,3 +166,23 @@ describe('Stable event position', () => {
       .toBe('9223372036854775807');
   });
 });
+
+it('emits one balance update per hold or release while retaining lifecycle events', () => {
+  for (const types of [['TransferInitiated', 'HoldPlaced'], ['HoldReleased', 'TransferFailed']]) {
+    const mapped = types.map(type => mapEvent(event(type, wallet(alice))));
+    expect(mapped.flatMap(value => value.pushes)).toHaveLength(1);
+    expect(mapped.flatMap(value => value.activities)).toHaveLength(0);
+  }
+});
+
+it.each(['TransferInitiated', 'TransferFailed'])(
+  'still validates the wallet payload of %s although it emits no balance update',
+  (type) => {
+    expect(() =>
+      mapEvent(event(type, { ...wallet(alice), currency: 'XXX' })),
+    ).toThrow('Invalid currency');
+    expect(() =>
+      mapEvent(event(type, wallet(randomUUID()))),
+    ).toThrow('Wallet owner missing from userIds');
+  },
+);

@@ -102,6 +102,7 @@ for (const status of [401, 403, 408, 429]) {
           step: 'DONE',
           amount: '10.00',
           currency: 'USD',
+          toCurrency: 'USD',
         });
       if (received.length === 1)
         return json(503, { message: 'Response lost after commit' });
@@ -142,7 +143,7 @@ test('a definitive validation rejection unlocks the transfer for correction', as
       keys.length === 1 ? 400 : 200,
       keys.length === 1
         ? { message: 'Invalid amount' }
-        : { id: keys[1], status: 'COMPLETED', step: 'DONE' },
+        : { id: keys[1], status: 'COMPLETED', step: 'DONE', currency: 'USD', toCurrency: 'USD' },
     );
   });
   const { TransferForm } = loadSource('app/transfers/new/transfer-form.tsx', {
@@ -191,12 +192,12 @@ test('slow polling reaches the final state without overlapping requests', async 
   );
   const monitor = await mountMonitor();
   await act(async () =>
-    monitor().track({ id: 'transfer', status: 'PROCESSING' }),
+    monitor().track({ id: 'transfer', status: 'PROCESSING', step: 'DONE', currency: 'USD', toCurrency: 'USD' }),
   );
   await act(async () => t.mock.timers.tick(2100));
   assert.equal(pending.length, 1);
   await act(async () =>
-    pending[0](json(200, { id: 'transfer', status: 'COMPLETED' })),
+    pending[0](json(200, { id: 'transfer', status: 'COMPLETED', step: 'DONE', currency: 'USD', toCurrency: 'USD' })),
   );
   assert.equal(monitor().transfer.status, 'COMPLETED');
   await act(async () => t.mock.timers.tick(10000));
@@ -213,7 +214,7 @@ test('polling recovers from an error and stops scheduling after unmount', async 
   );
   const monitor = await mountMonitor();
   await act(async () =>
-    monitor().track({ id: 'transfer', status: 'PROCESSING' }),
+    monitor().track({ id: 'transfer', status: 'PROCESSING', step: 'DONE', currency: 'USD', toCurrency: 'USD' }),
   );
   await act(async () =>
     pending[0](json(503, { message: 'Temporarily unavailable' })),
@@ -224,7 +225,7 @@ test('polling recovers from an error and stops scheduling after unmount', async 
   await act(async () => root.unmount());
   root = createRoot(container);
   await act(async () =>
-    pending[1](json(200, { id: 'transfer', status: 'PROCESSING' })),
+    pending[1](json(200, { id: 'transfer', status: 'PROCESSING', step: 'DONE', currency: 'USD', toCurrency: 'USD' })),
   );
   await act(async () => t.mock.timers.tick(10000));
   assert.equal(pending.length, 2);
@@ -239,17 +240,17 @@ test('a late response for the previous transfer cannot replace the current one',
     () => new Promise((resolve) => pending.push(resolve)),
   );
   const monitor = await mountMonitor();
-  await act(async () => monitor().track({ id: 'first', status: 'PROCESSING' }));
+  await act(async () => monitor().track({ id: 'first', status: 'PROCESSING', step: 'DONE', currency: 'USD', toCurrency: 'USD' }));
   await act(async () =>
-    monitor().track({ id: 'second', status: 'PROCESSING' }),
+    monitor().track({ id: 'second', status: 'PROCESSING', step: 'DONE', currency: 'USD', toCurrency: 'USD' }),
   );
   await act(async () =>
-    pending[0](json(200, { id: 'first', status: 'COMPLETED' })),
+    pending[0](json(200, { id: 'first', status: 'COMPLETED', step: 'DONE', currency: 'USD', toCurrency: 'USD' })),
   );
   assert.equal(monitor().transfer.id, 'second');
   assert.equal(monitor().transfer.status, 'PROCESSING');
   await act(async () =>
-    pending[1](json(200, { id: 'second', status: 'COMPLETED' })),
+    pending[1](json(200, { id: 'second', status: 'COMPLETED', step: 'DONE', currency: 'USD', toCurrency: 'USD' })),
   );
   assert.equal(monitor().transfer.status, 'COMPLETED');
 });

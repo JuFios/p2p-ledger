@@ -59,10 +59,18 @@ describe('Outbox relay (e2e)', () => {
         balanceAfter: { available: '25.00', held: '0.00' },
       },
     });
-    const [published] = await dataSource.query(
-      'SELECT published_at FROM outbox WHERE event_id = $1',
-      [row.event_id],
-    );
-    expect(published.published_at).not.toBeNull();
+    const deadline = Date.now() + 5000;
+    let publishedAt: Date | null = null;
+    while (Date.now() < deadline) {
+      const [published] = await dataSource.query(
+        'SELECT published_at FROM outbox WHERE event_id = $1', [row.event_id],
+      );
+      publishedAt = published?.published_at ?? null;
+      if (publishedAt) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect({ eventId: row.event_id, publishedAt }).toEqual({
+      eventId: row.event_id, publishedAt: expect.any(Date),
+    });
   });
 });

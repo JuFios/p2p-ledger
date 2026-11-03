@@ -10,6 +10,7 @@ import { randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { AuthUser } from '../auth/jwt.strategy';
 import { blockedEmails } from '../common/blocked-emails';
+import { isMoneyAmount } from '../common/is-money-amount';
 import { toMinor } from '../common/money';
 import { assertSameRequest, hashRequest } from '../common/request-hash';
 import { LedgerClient, LedgerUser } from '../ledger/ledger.client';
@@ -54,6 +55,12 @@ export class SplitBillsService {
     dto: CreateSplitBillDto,
     idempotencyKey?: string,
   ): Promise<CreateSplitBillResult> {
+    // Прямі виклики сервісу теж перевіряємо до hashOf: null інакше дає 500.
+    for (const participant of dto.participants) {
+      if (participant.amount !== undefined && !isMoneyAmount(participant.amount)) {
+        throw badRequest('INVALID_AMOUNT', 'Сума учасника має бути додатним числом до 1000000 з не більше ніж двома знаками');
+      }
+    }
     const requestHash = idempotencyKey ? this.hashOf(dto) : null;
     if (idempotencyKey) {
       const existing = await this.findByKey(

@@ -1,8 +1,10 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { Request, Response } from 'express';
 import { Method } from 'axios';
+
+import { httpBudget } from '../common/http-budget';
 
 const SOURCES = {
   ledger: 'LEDGER_SERVICE_URL',
@@ -15,10 +17,15 @@ export type ProxyRequest = Pick<Request, 'headers'>;
 
 @Injectable()
 export class UpstreamService {
+  private readonly logger = new Logger(UpstreamService.name);
+  private readonly timeoutMs: number;
+
   constructor(
     private readonly http: HttpService,
     private readonly config: ConfigService,
-  ) {}
+  ) {
+    this.timeoutMs = httpBudget(Number(config.get('CB_TIMEOUT_MS', 3000))).bff;
+  }
 
   async request<T = unknown>(
     source: Source,
@@ -37,6 +44,7 @@ export class UpstreamService {
         if (typeof value === 'string') headers[name] = value;
       }
     }
+    const started = Date.now();
     try {
       return await this.http.axiosRef.request<T>({
         url:
@@ -46,11 +54,17 @@ export class UpstreamService {
         data: options.body,
         params: options.query,
         headers,
-        timeout: 2500,
+        timeout: this.timeoutMs,
         maxRedirects: 0,
         validateStatus: () => true,
       });
-    } catch {
+    } catch (error) {
+      const code = (error as { code?: string })?.code;
+      const category = code === 'ECONNABORTED' || code === 'ETIMEDOUT'
+        ? 'timeout' : code === 'ECONNREFUSED' ? 'connection_refused'
+          : code === 'ENOTFOUND' || code === 'EAI_AGAIN' ? 'dns' : 'transport';
+      this.logger.warn({ category, source, method: options.method ?? 'GET',
+        path: path.split('?')[0], durationMs: Date.now() - started }, 'Upstream request failed');
       throw new ServiceUnavailableException('Upstream service unavailable');
     }
   }

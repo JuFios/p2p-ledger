@@ -1,3 +1,4 @@
+import { FRONTEND_TIMEOUT_MS } from './lib/server-config';
 import { NextRequest, NextResponse } from 'next/server';
 import { sessionClaims, tokenCookies } from './lib/session';
 
@@ -21,7 +22,7 @@ function refresh(refreshToken: string) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken }),
         cache: 'no-store',
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(FRONTEND_TIMEOUT_MS),
         redirect: 'manual',
       },
     );

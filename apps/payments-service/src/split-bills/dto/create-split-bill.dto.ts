@@ -11,6 +11,7 @@ import {
   IsString,
   MaxLength,
   ValidateNested,
+  ValidateIf,
 } from 'class-validator';
 import { SUPPORTED_CURRENCIES } from '../../common/currencies';
 import { IsMoneyAmount } from '../../common/is-money-amount';
@@ -24,7 +25,7 @@ export class SplitParticipantDto {
   email: string;
 
   // Лише для режиму CUSTOM.
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsMoneyAmount()
   amount?: number;
 }

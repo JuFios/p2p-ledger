@@ -1,3 +1,4 @@
+import { validateRequiredConfig } from './config-policy';
 import { plainToInstance } from 'class-transformer';
 import {
   IsIn,
@@ -9,6 +10,7 @@ import {
   IsString,
   IsUrl,
   Min,
+  Max,
   validateSync,
 } from 'class-validator';
 import { SUPPORTED_CURRENCIES } from '../common/currencies';
@@ -29,6 +31,7 @@ export class EnvironmentVariables {
 
   @IsInt()
   @Min(1)
+  @Max(65535)
   PORT: number = 3002;
 
   @IsString()
@@ -37,6 +40,7 @@ export class EnvironmentVariables {
 
   @IsInt()
   @Min(1)
+  @Max(65535)
   DATABASE_PORT: number = 5432;
 
   @IsString()
@@ -57,6 +61,7 @@ export class EnvironmentVariables {
 
   @IsInt()
   @Min(1)
+  @Max(65535)
   REDIS_PORT: number = 6379;
 
   @IsInt()
@@ -118,6 +123,7 @@ export class EnvironmentVariables {
 
   @IsInt()
   @Min(1)
+  @Max(60000)
   CB_TIMEOUT_MS: number = 3000;
 
   @IsInt()
@@ -160,6 +166,7 @@ export function parseFxRates(json: string): Record<string, number> {
 
 // Валідація env на старті (ConfigModule.forRoot({ validate })).
 export function validate(config: Record<string, unknown>) {
+  validateRequiredConfig(config, ['JWT_ACCESS_SECRET', 'DATABASE_HOST', 'DATABASE_USER', 'DATABASE_PASSWORD', 'DATABASE_NAME', 'REDIS_HOST', 'INTERNAL_API_TOKEN']);
   const validated = plainToInstance(EnvironmentVariables, config, {
     enableImplicitConversion: true,
   });

@@ -307,14 +307,14 @@ export default async function AdminPage({
               defaultValue={searchParams.walletId}
             />
           </Field>
-          <Field id="period-from" label="Від (ISO 8601, необов’язково)">
+          <Field id="period-from" label="Від (YYYY-MM-DD або дата-час із Z/±hh:mm)">
             <input
               name="from"
               placeholder="2026-11-01T00:00:00Z"
               defaultValue={searchParams.from}
             />
           </Field>
-          <Field id="period-to" label="До (ISO 8601, необов’язково)">
+          <Field id="period-to" label="До (YYYY-MM-DD або дата-час із Z/±hh:mm)">
             <input
               name="to"
               placeholder="2026-11-02T00:00:00Z"

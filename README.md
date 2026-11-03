@@ -154,7 +154,7 @@ Nest-сервіси мають `/health` і `/metrics`. Адмін-логін у
 JWT-секретів; обов’язкові значення потрібні в усіх середовищах. Лише при
 `NODE_ENV=production` ledger додатково відхиляє `change-me-*`, JWT/internal
 секрети коротші за 32 символи й пароль адміністратора коротший за 12.
-Штатний Compose не задає `NODE_ENV=production`, тому перевірка сили секретів
+Штатний Compose явно задає `NODE_ENV=development`, тому перевірка сили секретів
 у демонстраційному запуску неактивна; `.env.example` працює без змін.
 
 Схема БД ledger створюється міграціями (`apps/ledger-service/src/migrations`),
@@ -498,7 +498,7 @@ class-validator і whitelist; перевірка власності та біз�
 `Authorization` та `Idempotency-Key` передаються без зміни значення.
 Статус і JSON-тіло upstream збережено, зокрема 202/200 для нового/повторного
 переказу, 422 для іншого тіла з тим самим ключем і 429 із `Retry-After`.
-Виклики не повторюються автоматично, таймаут — 2500 мс; мережева помилка
+Виклики не повторюються автоматично, таймаут — `CB_TIMEOUT_MS + 2000` мс (типово 5000 мс); мережева помилка
 дає 503. Переадресації upstream не виконуються.
 
 `GET /dashboard` паралельно читає гаманці, 10 останніх переказів і 10 записів
@@ -679,7 +679,7 @@ Node 20.20.2, увімкнені tracing і notifications; dev-стек прац
 
 ## Стартовий код
 
-Збережено DTO login/register, bcrypt для паролів, наявні Dockerfiles,
+Збережено DTO login/register і bcrypt для паролів,
 основу Compose й окремі пакети NestJS/Next.js. Auth доповнено throttle,
 повним хешуванням і атомарною ротацією refresh, logout та валідацією env;
 сутність User отримала явний тип refreshTokenHash і втратила зв’язок із Wallet.
@@ -731,7 +731,7 @@ groups переживали перестворення контейнера. Т�
 
 ## Знайдені проблеми стартового коду
 
-Auth стартував із загальновідомими запасними JWT-секретами при відсутньому env. Ці fallback прибрано: ledger перевіряє всі свої env через `ConfigModule.forRoot({ validate })` і class-validator. У `production` JWT-секрети та internal-токен мають бути від 32 символів, пароль адміністратора — від 12; `change-me-*` заборонено. Штатний Compose не задає `NODE_ENV=production`, тому перевірка сили секретів у демонстраційному запуску неактивна; вона страхує реальне розгортання. Обов’язкові значення мають бути задані в усіх середовищах.
+Auth стартував із загальновідомими запасними JWT-секретами при відсутньому env. Ці fallback прибрано: ledger перевіряє всі свої env через `ConfigModule.forRoot({ validate })` і class-validator. У `production` JWT-секрети та internal-токен мають бути від 32 символів, пароль адміністратора — від 12; `change-me-*` заборонено. Штатний Compose явно задає `NODE_ENV=development`, тому перевірка сили секретів у демонстраційному запуску неактивна; вона страхує реальне розгортання. Обов’язкові значення мають бути задані в усіх середовищах.
 
 Refresh-токени хешувалися bcrypt, який обрізає вхід до 72 байтів: різні JWT одного користувача могли відповідати тому самому хешу. Тепер хешується весь токен SHA-256, порівняння виконується через `timingSafeEqual`, а випадковий `jti` забезпечує різні refresh-токени навіть в одну секунду.
 
@@ -994,7 +994,7 @@ Node test runner. Перевіряються втрачена відповідь
 зупинка при unmount і захист від запізнілої відповіді іншого переказу.
 Наявні HTTP-тести не змінено.
 
-У поточному наборі 38 frontend-тестів: попередні 25 лишилися без змін;
+До виправлень аудиту набір містив 38 frontend-тестів; попередні 25 лишилися без змін;
 додано 5 DOM-перевірок відновлення чотирьох форм і заблокованого сховища,
 1 DOM-перевірку перепідключення після серверного disconnect, 1 перевірку
 точного форматування сум, 1 refresh grace і 2 logout. Мутація без запису
@@ -1028,11 +1028,9 @@ refresh/logout і захист нового login від запізнілого 
   [офіційним переліком релізів](https://nodejs.org/en/about/previous-releases).
   Для подальшого розвитку потрібен окремий перехід на підтримуваний Node LTS
   (22+), нові мажори NestJS/Next.js з перевіркою міграцій і залежностей;
-  у межах цього рішення версії не оновлювалися.
-- `npm audit --omit=dev` на 2026-11-02: frontend — 2 знахідки
-  (1 critical, 1 high), ledger — 24 (1 critical, 8 high, 15 moderate).
-  Виправлення потребують окремого мажорного оновлення сумісного стека;
-  примусове `npm audit fix --force` не застосовувалося.
+  Node/Nest/Next у межах цього рішення збережено; сумісні security-залежності оновлено.
+- Залишкові залежності й застосовність advisory описано нижче. Зелений CI не
+  означає відсутності scanner findings або готовності до публічного розгортання.
 - FX лишається мок-модулем із курсами з env, без окремого fx-service та
   зовнішнього провайдера. Ліміт суми однаковий у номінальних одиницях різних
   валют; чорний список — демонстраційне правило. Реальні котирування й
@@ -1059,3 +1057,176 @@ refresh/logout і захист нового login від запізнілого 
   слотів покращив би використання ресурсів. Лічильники rate limit локальні
   процесу. Усі поточні перевірки виконують конкретні сценарії та гонки;
   наведені timings не є оцінкою максимальної пропускної здатності.
+
+
+### Підтримка контрактів і перевірки виправлень
+
+`contracts/` містить єдине джерело технічних правил: relay-шаблон, money/date
+валідацію, конфігураційну політику, HTTP-бюджети та спільні поведінкові тести.
+`node scripts/sync-contracts.cjs` оновлює локальні копії, а `--check` у кожному
+CI job відхиляє розходження. Сервіси як і раніше збираються окремо з власної
+теки: жодних спільних ORM entities, БД або runtime-залежності від іншого сервісу.
+Зміни загального алгоритму вносяться лише до джерела у `contracts/`.
+
+Закриті frontend-статуси, кроки, split-режими та валюти мають literal types.
+Невідомий HTTP-стан дає явну помилку сумісності, невідомий WS-стан запускає
+REST-відновлення. JWT payload читається як UTF-8; Unicode email не прибирає
+кнопки власної частки. Старі відповіді та помилки reload форми переказу
+відкидаються, включно з результатами після unmount.
+
+Для CUSTOM явний `amount: null` відхиляють і BFF/payments DTO, і домен до
+хешування ключа чи звернення до БД. Reconciliation приймає `YYYY-MM-DD` або
+ISO дату-час із секундою і часовим поясом; некоректні дні, week/ordinal/basic
+формати відхиляються до SQL, у CLI також. Межі періоду мають порядок from ≤ to.
+
+Frontend/BFF/payments використовують однаковий `CB_TIMEOUT_MS` (Compose
+передає його всім трьом). Ledger HTTP timeout = цей бюджет, BFF додає 2000 мс,
+frontend — 5000 мс; типово 3000/5000/8000 мс. Saga lease має бути довшим за
+ledger timeout. Split create/pay мають один послідовний ledger-виклик, пошук
+учасників виконується паралельно. Автоматичних повторів мутацій немає;
+після невизначеного результату форма повторює ті самі тіло та ключ.
+Клієнт API без ключа не отримує гарантії exactly-once після втрати відповіді.
+BFF лог містить лише категорію transport/timeout/connection_refused/dns,
+source/method/path/durationMs і стандартну trace-кореляцію; тіло та секретні
+заголовки не потрапляють у діагностику.
+
+Перший WS handshake використовує токен початкового запиту; кожний reconnect
+бере новий. `TransferInitiated`/`TransferFailed` збережені в event store та outbox,
+але додаткового balance push не дають: його надсилають `HoldPlaced`/`HoldReleased`.
+Позиційне впорядкування, дедуплікація та доменні події збережені.
+
+Всі автоматизовані install виконуються через `npm ci`. Dockerfiles мають
+`test` (dev tooling), `build` та кінцевий `runtime` target із production
+залежностями (`--omit=dev --omit=optional`) й `USER node`. Next `.next` належить цьому користувачу, включно
+з cache. Runtime застосовує скомпільовані міграції на старті. Ручні команди:
+`npm run migration:run:prod`, `npm run migration:revert:prod` у backend
+контейнері; ledger `npm run reconcile` запускає `dist/reconcile.js`.
+Локально перед reconcile потрібен `npm run build`. Генерація міграцій
+залишається в dev/test target з TypeScript tooling.
+
+Змінені наявні тести: socket-expiry додатково вимагає рівно один token fetch
+на handshake; mapper тепер очікує balance тільки для грошових подій, окремо
+перевіряючи одну доставку на hold/release; outbox e2e чекає `published_at`
+до обмеженого дедлайну, бо Redis XADD видимий до PostgreSQL COMMIT.
+До HTTP e2e додано null і calendar-date сценарії з перевіркою відсутності
+upstream-виклику/створеного рахунку. Інші assertions та системний disconnect
+сценарій збережені. Нові регресії перевіряють реальний React DOM, повільний
+HTTP, безпечні логи, спільне money-правило, retry/order/partial failure/shutdown
+relay та відхилення невідомих контрактних значень.
+
+
+### Залежності та межі security-виправлень
+
+Node 20, Nest 10 і Next 14 збережено. Оновлено body-parser 1, qs 6,
+lodash 4, js-yaml 4, Multer 2, Glob 10 та сумісні build-залежності
+webpack 5/AJV 8/picomatch 4. Next використовує patched PostCSS 8.5.32.
+Точні overrides і resolved версії зафіксовано в manifests/lockfiles.
+
+Ledger використовує bcrypt 6 (Node ≥18) з тим самим password hash format
+і API hash/compare: [release/changelog](https://github.com/kelektiv/node.bcrypt.js/releases/tag/v6.0.0)
+змінює native packaging та мінімальний Node. Регресія перевіряє пароль із
+hash, створеним bcrypt 5.1.1. Це прибрало node-pre-gyp/tar6 та їхній critical
+scanner finding без переписування auth чи зміни паролів. Старі bcrypt refresh
+hashes з 72-byte неоднозначністю вимагають повторного login; повертати їхню
+перевірку небезпечно. Сесії з повним SHA-256 hash без sid сумісні через міграцію.
+
+`npm audit --omit=dev` на 2026-11-03 (advisory-level, не кількість експлойтів):
+
+| Пакет | moderate | high | critical |
+|---|---:|---:|---:|
+| ledger-service | 15 | 0 | 0 |
+| payments-service | 15 | 0 | 0 |
+| notifications-service | 16 | 0 | 0 |
+| BFF | 11 | 0 | 0 |
+| frontend | 0 | 0 | 1 |
+
+Кількості включають транзитивні meta-vulnerabilities та повтори між сервісами.
+Повний audit із dev-залежностями також має невиправлені findings: зокрема
+старі мінорні лінійки glob/minimatch, tmp і deepmerge у toolchain. Runtime
+образи не містять ESLint/Jest/Nest CLI/TypeScript; production-дерево перевіряється окремо.
+
+Залишкові backend advisory стосуються SSE injection (`@nestjs/core`), file-type
+на не довірених файлах, glob cancellation/minimatch amplification та uuid
+v3/v5/v6 із зовнішнім buffer. У поточному API немає SSE/file uploads/детекції
+типу файлів, довільних glob-patterns чи uuid buffer API; TypeORM отримує явні
+класи entities/migrations. Це оцінка досяжності за кодом, а не оголошення
+вразливих пакетів виправленими. Patched лінійки вимагають інших мажорів або
+оновлення батьківських пакетів; неперевірені major overrides не застосовувалися.
+Джерела: [Nest SSE](https://github.com/advisories/GHSA-36xv-jgw5-4q75),
+[file-type](https://github.com/advisories/GHSA-5v7r-6r5c-r473),
+[glob](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4),
+[minimatch](https://github.com/advisories/GHSA-g3hv-75wg-m249),
+[uuid](https://github.com/advisories/GHSA-w5hq-g745-h8pq).
+
+**Відкритий блокер Next 14:** застосунок використовує App Router та Server
+Actions, тому [DoS Server Actions](https://github.com/advisories/GHSA-p3m5-59mp-jv5r)
+стосується цього режиму. Опублікований fix — Next 15.5.28 або 16.4.1; patched
+Next 14 немає. Окремий [WebSocket upgrade SSRF](https://github.com/advisories/GHSA-c4j6-fc7j-m34r)
+потребує уваги для self-hosted Node server: до міграції origin слід закривати
+reverse proxy, блокувати непотрібні upgrade-запити до Next і обмежувати egress.
+Браузерний Socket.IO у цьому рішенні ходить напряму в notifications.
+Повне усунення цих версійних ризиків потребує окремого дозволу змінити Next major.
+
+Image Optimization вимкнено (`images.unoptimized`): image endpoint тут не
+потрібний, це прибирає відповідну поверхню optimizer DoS/RCE. Windows advisory
+не відповідає Linux/Alpine образам; Edge Server Actions та Pages Router/i18n
+не використовуються; зовнішніх rewrites, beforeInteractive з не довіреним
+вмістом і спільного CDN-кешу немає. Server fetch передає UTF-8 JSON через URL
+з `cache: no-store`; Server Actions авторизуються на BFF/сервісі. Ці умови
+потрібно переглянути при зміні deployment/configuration.
+
+
+Перевірка поточних виправлень на Node 20: lint/typecheck/build усіх п’яти
+застосунків, 628 package unit/e2e/DOM/production-HTTP тестів і 17 system/helper
+тестів — 645 унікальних перевірок. Ізольована гонка 50 переказів дала
+10 COMPLETED / 40 FAILED INSUFFICIENT_FUNDS, available/held 0.00/0.00,
+одержувач 100.00, reconciliation true. Runtime міграції up/down/up, schema
+parity трьох БД і reconcile CLI зелені без TypeScript/ts-node в образах.
+
+Браузер: ASCII FX 1.23 USD → 1.13 EUR; CUSTOM 2.01 USD accept/pay →
+PAID/SETTLED; non-admin deny та admin journal/reconciliation/traces; reconnect
+після зупинки notifications відновив пропущені 0.13 без reload. UTF-8 JWT
+перевірений DOM-регресією; HTML email inputs лишаються native type=email.
+Trace реального UI-переказу `f7820f0e3a604f888c9bf882b03c260d`: чотири сервіси,
+275 span-ів, шість saga-кроків, 10 publish/10 process із перевіреними parent links.
+
+Docker image Size до/після (MB, decimal): ledger 177.2 → 76.9,
+payments 177.9 → 77.2, notifications 178.1 → 76.0, BFF 166.4 → 71.8,
+frontend 335.0 → 83.3. Кожний runtime має UID 1000; write у Next cache перевірено.
+Це виміри локальних образів, а не оцінка production capacity чи security certification.
+
+
+### Уточнення форматування та перевірки відповідей
+
+Дати й час (рахунки, стрічка активності) форматуються з явним
+`timeZone: Europe/Kyiv` на сервері та в браузері; мітки «Сьогодні»/«Вчора»
+порівнюють календарні дні в тому самому поясі. Початковий рендер і гідрація
+показують однакову дату, зокрема біля опівночі та переходів на
+літній/зимовий час.
+Для звірки через адмінку, HTTP API та CLI приймається `YYYY-MM-DD` або
+`YYYY-MM-DDTHH:mm:ss[.SSS]Z` / `YYYY-MM-DDTHH:mm:ss[.SSS]±hh:mm`.
+Дата-час без секунд або часового поясу відхиляється; сама дата означає UTC.
+
+Бюджет BFF обчислюється один раз у конструкторі; frontend читає й перевіряє
+`CB_TIMEOUT_MS` у спільному серверному модулі, поза перехопленням мережевих
+помилок. Порожнє чи некоректне значення відхиляється, відсутнє означає 3000 мс.
+Місце виклику явно обирає парсер гаманця, переказу або рахунку; невідома
+структура списку та невідомі enum-значення не проходять непомітно. Некоректні
+`wallet.balance` / `transfer.status`, включно з null, запускають REST-refetch.
+
+Runtime-образи всіх Nest-сервісів за замовчуванням мають `NODE_ENV=production`.
+Демонстраційний Compose явно перевизначає його на `development`, щоб зберегти
+локальний запуск із публічними значеннями `.env.example`. Для production
+потрібні власні секрети й `NODE_ENV=production` у конфігурації розгортання.
+Копії вузьких контрактів залишаються похідними від `contracts/`: незалежні
+Docker build contexts не імпортують файлів сусіднього сервісу.
+Перевірка суми в payments використовує той самий `isMoneyAmount`, що й DTO:
+вона захищає прямі виклики сервісу до обчислення хешу та роботи з БД.
+Явний `participants[].amount: null` відхиляється BFF і payments як 400;
+пропущена сума лишається дозволеною для рівного поділу.
+
+Регресії: додано перевірку SSR UTC → hydration Europe/Kyiv для BillDetails,
+опівночі/DST, null socket payload і конфігурації таймауту. Наявні тести
+парсерів оновлено під явний вибір парсера, а transfer-фікстури у client-тестах
+доповнено `step`, `currency`, `toCurrency` відповідно до чинного API. Їхні
+перевірки ідемпотентності, polling і відкидання запізнілих відповідей збережено.

@@ -29,6 +29,7 @@ export async function readResponse<T>(res: Response): Promise<T> {
 export async function clientFetch<T>(
   path: string,
   init?: RequestInit,
+  parse?: (value: unknown) => T,
 ): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body) headers.set('Content-Type', 'application/json');
@@ -37,5 +38,6 @@ export async function clientFetch<T>(
     headers,
     cache: 'no-store',
   });
-  return readResponse<T>(res);
+  const value = await readResponse<T>(res);
+  return parse ? parse(value) : value;
 }

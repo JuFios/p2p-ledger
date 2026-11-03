@@ -1,3 +1,4 @@
+import { validateRequiredConfig } from './config-policy';
 import { plainToInstance } from 'class-transformer';
 import { IsEmail, IsIn, IsInt, IsNotEmpty, IsString, IsUrl, Matches, Max, Min, validateSync } from 'class-validator';
 
@@ -96,19 +97,9 @@ export class EnvironmentVariables {
 }
 
 export function validate(config: Record<string, unknown>) {
+  validateRequiredConfig(config, ['JWT_ACCESS_SECRET', 'DATABASE_HOST', 'DATABASE_USER', 'DATABASE_PASSWORD', 'DATABASE_NAME', 'REDIS_HOST', 'INTERNAL_API_TOKEN', 'JWT_REFRESH_SECRET', 'ADMIN_PASSWORD']);
   const validated = plainToInstance(EnvironmentVariables, config, { enableImplicitConversion: true });
   const errors = validateSync(validated, { skipMissingProperties: false });
   if (errors.length) throw new Error(errors.toString());
-  if (validated.NODE_ENV === 'production') {
-    for (const name of ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'INTERNAL_API_TOKEN'] as const) {
-      const value = validated[name];
-      if (value.startsWith('change-me-') || value.length < 32) {
-        throw new Error(`${name}: production requires a non-placeholder secret of at least 32 characters`);
-      }
-    }
-    if (validated.ADMIN_PASSWORD.startsWith('change-me-') || validated.ADMIN_PASSWORD.length < 12) {
-      throw new Error('ADMIN_PASSWORD: production requires a non-placeholder password of at least 12 characters');
-    }
-  }
   return validated;
 }

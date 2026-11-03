@@ -52,12 +52,48 @@ test('server expiry reconnects with a fresh handshake and restores state on conn
   try {
     await act(async () => root.render(React.createElement(App)));
     assert.equal(reads, 1);
+    assert.equal(handshakes, 1);
     await act(async () => socket.emit('disconnect', 'io server disconnect'));
     await act(async () => t.mock.timers.tick(3000));
     assert.equal(reads, 2);
+    assert.equal(handshakes, 2);
     assert.notEqual(tokens[0], tokens[1]);
     assert.match(document.body.textContent, /online/);
   } finally {
     await act(async () => root.unmount());
   }
+});
+
+test('malformed socket state triggers a REST refresh without dispatching invalid data', async (t) => {
+  const socket = new EventEmitter();
+  socket.connect = () => socket;
+  socket.disconnect = () => socket;
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ url: 'http://localhost:3003', token: 'token' }));
+  const { useLiveSocket } = loadSource('lib/use-live-socket.ts', {
+    'socket.io-client': { io: () => socket },
+  });
+  let refreshes = 0, wallets = 0, transfers = 0;
+  function App() {
+    useLiveSocket({ onConnect: () => refreshes++, onWallet: () => wallets++, onTransfer: () => transfers++ });
+    return null;
+  }
+  const root = createRoot(document.getElementById('root'));
+  try {
+    await act(async () => root.render(React.createElement(App)));
+    for (const event of ['wallet.balance', 'transfer.status']) {
+      for (const value of [null, undefined, {}, 'invalid', []]) {
+        await act(async () => socket.emit(event, value));
+      }
+    }
+    assert.equal(refreshes, 10);
+    assert.equal(wallets, 0);
+    assert.equal(transfers, 0);
+    await act(async () => {
+      socket.emit('wallet.balance', { walletId: 'wallet', currency: 'USD', balance: '1.00', available: '1.00', held: '0.00' });
+      socket.emit('transfer.status', { transferId: 'transfer', status: 'COMPLETED', step: 'DONE' });
+    });
+    assert.equal(wallets, 1);
+    assert.equal(transfers, 1);
+    assert.equal(refreshes, 10);
+  } finally { await act(async () => root.unmount()); }
 });

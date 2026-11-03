@@ -14,9 +14,11 @@
     "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
     "typeorm": "typeorm-ts-node-commonjs -d src/data-source.ts",
     "migration:generate": "npm run typeorm -- migration:generate",
+    "migration:run:prod": "node node_modules/typeorm/cli.js -d dist/data-source.js migration:run",
+    "migration:revert:prod": "node node_modules/typeorm/cli.js -d dist/data-source.js migration:revert",
     "migration:run": "npm run typeorm -- migration:run",
     "migration:revert": "npm run typeorm -- migration:revert",
-    "reconcile": "ts-node src/reconcile.ts"
+    "reconcile": "node dist/reconcile.js"
   },
   "dependencies": {
     "dotenv": "^16.6.1",
@@ -46,7 +48,7 @@
     "passport-jwt": "^4.0.1",
     "class-validator": "^0.14.1",
     "class-transformer": "^0.5.1",
-    "bcrypt": "^5.1.1",
+    "bcrypt": "^6.0.0",
     "reflect-metadata": "^0.2.1",
     "rxjs": "^7.8.1"
   },
@@ -76,5 +78,17 @@
     "testPathIgnorePatterns": ["/node_modules/", "/test/e2e/"],
     "transform": { "^.+\\.(t|j)s$": "ts-jest" },
     "collectCoverageFrom": ["src/**/*.(t|j)s"]
+  },
+  "overrides": {
+    "multer@2": "^2.5.0",
+    "glob@10": "^10.5.0",
+    "body-parser@1": "^1.20.9",
+    "qs@6": "^6.17.1",
+    "lodash@4": "^4.18.1",
+    "js-yaml@4": "^4.3.2",
+    "webpack@5": "^5.112.2",
+    "ajv@8": "^8.18.0",
+    "picomatch@4": "^4.0.4",
+    "tmp@0.2": "^0.2.6"
   }
 }

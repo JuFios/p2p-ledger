@@ -31,6 +31,8 @@ export const LEDGER_TYPES = [
   'TransferCompleted',
   'TransferFailed',
 ];
+const BALANCE_NEUTRAL_EVENTS = new Set(['TransferInitiated', 'TransferFailed']);
+
 export const PAYMENT_TYPES = [
   'TransferStatusChanged',
   'SplitBillCreated',
@@ -91,6 +93,9 @@ export function mapEvent(event: IntegrationEvent): {
   if (LEDGER_TYPES.includes(event.type)) {
     if (event.producer !== 'ledger-service')
       throw new Error('Invalid producer');
+    // Lifecycle-події валідуються, але не створюють push: їхній знімок
+    // дублює HoldPlaced/HoldReleased.
+    const emitsBalance = !BALANCE_NEUTRAL_EVENTS.has(event.type);
     const wallets =
       event.type === 'TransferCompleted'
         ? [record(payload.from), record(payload.to)]
@@ -103,17 +108,18 @@ export function mapEvent(event: IntegrationEvent): {
       const total = money(balanceAfter.available) + money(balanceAfter.held);
       if (!['USD', 'EUR', 'UAH'].includes(String(wallet.currency)))
         throw new Error('Invalid currency');
-      pushes.push({
-        userId: ownerId,
-        event: 'wallet.balance',
-        payload: {
-          walletId: uuid(wallet.walletId),
-          currency: wallet.currency,
-          balance: `${total / 100n}.${(total % 100n).toString().padStart(2, '0')}`,
-          available: balanceAfter.available,
-          held: balanceAfter.held,
-        },
-      });
+      if (emitsBalance)
+        pushes.push({
+          userId: ownerId,
+          event: 'wallet.balance',
+          payload: {
+            walletId: uuid(wallet.walletId),
+            currency: wallet.currency,
+            balance: `${total / 100n}.${(total % 100n).toString().padStart(2, '0')}`,
+            available: balanceAfter.available,
+            held: balanceAfter.held,
+          },
+        });
     }
     if (event.type === 'MoneyDeposited')
       activity(uuid(payload.ownerId), 'DEPOSIT');

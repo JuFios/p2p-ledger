@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientFetch } from './http';
-import { isFinal, Transfer, TransferUpdate } from './types';
+import { isFinal, parseTransfer, Transfer, TransferUpdate } from './types';
 
 export function useTransfer() {
   const [transfer, setTransfer] = useState<Transfer | null>(null);
@@ -15,7 +15,7 @@ export function useTransfer() {
     if (!value) return;
     const request = ++revision.current;
     try {
-      const result = await clientFetch<Transfer>(`/transfers/${value.id}`);
+      const result = await clientFetch<Transfer>(`/transfers/${value.id}`, undefined, parseTransfer);
       if (request === revision.current && current.current?.id === value.id) {
         setTransfer(result);
         setError(null);

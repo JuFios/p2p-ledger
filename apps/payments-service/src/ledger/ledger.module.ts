@@ -1,6 +1,7 @@
 import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { httpBudget } from '../common/http-budget';
 import { LedgerClient } from './ledger.client';
 
 @Module({
@@ -10,7 +11,7 @@ import { LedgerClient } from './ledger.client';
       useFactory: (config: ConfigService) => ({
         baseURL: config.getOrThrow<string>('LEDGER_SERVICE_URL'),
         // Запит обривається разом з таймаутом breaker'а, а не висить далі.
-        timeout: config.getOrThrow<number>('CB_TIMEOUT_MS'),
+        timeout: httpBudget(config.getOrThrow<number>('CB_TIMEOUT_MS')).ledger,
         headers: {
           'x-internal-token': config.getOrThrow<string>('INTERNAL_API_TOKEN'),
         },

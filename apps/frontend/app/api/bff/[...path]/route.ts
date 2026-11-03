@@ -1,3 +1,4 @@
+import { FRONTEND_TIMEOUT_MS } from '@/lib/server-config';
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -55,7 +56,7 @@ async function proxy(
         headers,
         body: req.method === 'GET' ? undefined : await req.text(),
         cache: 'no-store',
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(FRONTEND_TIMEOUT_MS),
         redirect: 'manual',
       },
     );

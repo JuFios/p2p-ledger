@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { DomainEvent } from '../ledger/domain/events';
 import { formatMinor } from '../ledger/domain/money';
@@ -61,6 +62,14 @@ export async function reconcile(
   dataSource: DataSource,
   range: ReconciliationRange,
 ): Promise<ReconciliationReport> {
+  for (const date of [range.from, range.to]) {
+    if (date !== undefined && (!(date instanceof Date) || !Number.isFinite(date.getTime()))) {
+      throw new BadRequestException('Некоректна дата періоду звірки');
+    }
+  }
+  if (range.from && range.to && range.from > range.to) {
+    throw new BadRequestException('from має передувати to');
+  }
   return dataSource.transaction('REPEATABLE READ', async (manager) => {
     await manager.query('SET TRANSACTION READ ONLY');
     const totals: { currency: string; debits: string; credits: string }[] =

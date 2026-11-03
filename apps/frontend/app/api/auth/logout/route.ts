@@ -1,3 +1,4 @@
+import { FRONTEND_TIMEOUT_MS } from '@/lib/server-config';
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(req: NextRequest) {
@@ -14,7 +15,7 @@ export async function POST(req: NextRequest) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken }),
-        cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(3000),
+        cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(FRONTEND_TIMEOUT_MS),
       });
     } catch {}
   }

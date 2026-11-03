@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { Activity, TransferUpdate, WalletUpdate } from './types';
+import { Activity, validWalletUpdate, validTransferUpdate, TransferUpdate, WalletUpdate } from './types';
 
 interface LiveHandlers {
   onConnect?: () => void;
@@ -29,12 +29,19 @@ export function useLiveSocket(handlers: LiveHandlers) {
       try {
         const res = await fetch('/api/auth/ws-token', { cache: 'no-store' });
         if (!res.ok) throw new Error('session unavailable');
-        const { url } = await res.json();
+        const { url, token: initialToken } = await res.json();
+        let firstToken: string | undefined = initialToken;
         if (stopped) return;
         socket = io(`${url.replace(/\/$/, '')}/ws`, {
           autoConnect: false,
           auth: (done) => {
-            // Кожен handshake бере свіжий access token, включно з refresh.
+            if (firstToken !== undefined) {
+              const token = firstToken;
+              firstToken = undefined;
+              if (!stopped) done({ token });
+              return;
+            }
+            // Повторний handshake бере свіжий access token, включно з refresh.
             fetch('/api/auth/ws-token', { cache: 'no-store' })
               .then(async (response) => {
                 if (!response.ok) throw new Error('session unavailable');
@@ -61,11 +68,11 @@ export function useLiveSocket(handlers: LiveHandlers) {
           setStatus(navigator.onLine ? 'reconnecting' : 'offline');
           if (!socket?.active) schedule(() => socket?.connect());
         });
-        socket.on('wallet.balance', (value: WalletUpdate) =>
-          callbacks.current.onWallet?.(value),
+        socket.on('wallet.balance', (value: unknown) =>
+          validWalletUpdate(value) ? callbacks.current.onWallet?.(value) : callbacks.current.onConnect?.(),
         );
-        socket.on('transfer.status', (value: TransferUpdate) =>
-          callbacks.current.onTransfer?.(value),
+        socket.on('transfer.status', (value: unknown) =>
+          validTransferUpdate(value) ? callbacks.current.onTransfer?.(value) : callbacks.current.onConnect?.(),
         );
         socket.on('activity.created', (value: Activity) =>
           callbacks.current.onActivity?.(value),

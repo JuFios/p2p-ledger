@@ -8,7 +8,7 @@ import {
   writeAttempt,
 } from '@/lib/attempt-storage';
 import { ApiError, clientFetch, isDefinitiveRejection } from '@/lib/http';
-import { CURRENCIES, Wallet } from '@/lib/types';
+import { parseList, parseWallet, CURRENCIES, Wallet } from '@/lib/types';
 import { useLiveSocket } from '@/lib/use-live-socket';
 import {
   Alert,
@@ -56,7 +56,7 @@ export function Wallets({
   async function reload() {
     const request = ++revision.current;
     try {
-      const values = await clientFetch<Wallet[]>('/wallets');
+      const values = await clientFetch<Wallet[]>('/wallets', undefined, parseList(parseWallet));
       if (request === revision.current) {
         setWallets(values);
         setError(null);
