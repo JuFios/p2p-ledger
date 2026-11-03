@@ -87,6 +87,8 @@ services:
       retries: 10
 
   payments-service:
+    environment:
+      CB_TIMEOUT_MS: ${CB_TIMEOUT_MS:-3000}
     build: ./apps/payments-service
     env_file: ./apps/payments-service/.env.example
     depends_on:
@@ -121,6 +123,8 @@ services:
       retries: 10
 
   bff:
+    environment:
+      CB_TIMEOUT_MS: ${CB_TIMEOUT_MS:-3000}
     build: ./apps/bff
     env_file: ./apps/bff/.env.example
     depends_on:
@@ -142,6 +146,7 @@ services:
     build: ./apps/frontend
     env_file: ./apps/frontend/.env.example
     environment:
+      CB_TIMEOUT_MS: ${CB_TIMEOUT_MS:-3000}
       BFF_URL: http://bff:3004
       WS_PUBLIC_URL: http://localhost:3003
     depends_on:
