@@ -146,11 +146,14 @@ export function ActivityFeed({
           </h2>
           <Card className="divide-y py-0 sm:py-0">
             {entries.map((item) => {
+              const received = item.type === 'TRANSFER_RECEIVED';
               const incoming =
-                item.type === 'DEPOSIT' || item.type === 'TRANSFER_RECEIVED';
+                item.type === 'DEPOSIT' || received;
               const outgoing =
                 item.type === 'WITHDRAWAL' || item.type === 'TRANSFER_SENT';
               const failed = item.type === 'TRANSFER_FAILED';
+              const amount = received ? item.payload.toAmount : item.payload.amount;
+              const currency = received ? item.payload.toCurrency : item.payload.currency;
               return (
                 <div
                   key={item.id}
@@ -189,14 +192,14 @@ export function ActivityFeed({
                       <h3 className="text-sm">
                         {labels[item.type] ?? item.type}
                       </h3>
-                      {typeof item.payload.amount === 'string' && (
+                      {typeof amount === 'string' && (
                         <p
                           className={`amount whitespace-nowrap text-sm font-semibold ${incoming ? 'text-positive' : failed ? 'text-negative' : ''}`}
                         >
                           {incoming ? '+' : outgoing ? '−' : ''}
-                          {money(item.payload.amount)}{' '}
+                          {money(amount)}{' '}
                           <span className="text-xs font-normal text-muted">
-                            {String(item.payload.currency ?? '')}
+                            {String(currency ?? '')}
                           </span>
                         </p>
                       )}

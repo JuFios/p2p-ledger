@@ -392,6 +392,7 @@ Notifications потребує окремого Redis на 6380; ledger/payments
 BFF e2e використовує HTTP-двійники без БД; payments e2e — справжній Postgres
 та HTTP-двійник ledger. Frontend: `npm ci`, lint, tsc, `npm run build`, `npm test`;
 production HTTP-тестам потрібна готова `.next`, DOM-тести виконують реальні React-компоненти.
+Стрічка перевіряє зараховану суму/валюту отримувача FX і списану суму відправника.
 
 Повний system/race через реальні сервіси (Compose v2.24.4+, із кореня):
 
