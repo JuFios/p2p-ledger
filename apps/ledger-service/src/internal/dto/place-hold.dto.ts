@@ -1,5 +1,5 @@
 import { IsIn, IsString, IsUUID, Length } from 'class-validator';
-import { SUPPORTED_CURRENCIES } from '../../wallets/dto/create-wallet.dto';
+import { SUPPORTED_CURRENCIES } from '../../common/currencies';
 import { IsAmountMinor } from './amount-minor';
 
 export class PlaceHoldDto {

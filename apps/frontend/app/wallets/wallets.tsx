@@ -1,5 +1,7 @@
 'use client';
 
+import { MAX_AMOUNT } from '@/lib/validation';
+
 import { useEffect, useRef, useState } from 'react';
 import {
   attemptScope,
@@ -183,13 +185,13 @@ export function Wallets({
                 <Field
                   id={`amount-${wallet.id}`}
                   label="Сума операції"
-                  help="Від 0.01 до 1 000 000, до двох знаків після крапки."
+                  help={`Від 0.01 до ${money(String(MAX_AMOUNT))}, до двох знаків після крапки.`}
                 >
                   <input
                     name="amount"
                     type="number"
                     min="0.01"
-                    max="1000000"
+                    max={MAX_AMOUNT}
                     step="0.01"
                     required
                     placeholder="0.00"

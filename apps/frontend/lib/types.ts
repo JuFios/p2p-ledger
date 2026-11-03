@@ -1,5 +1,6 @@
-export const CURRENCIES = ['USD', 'EUR', 'UAH'] as const;
-export type Currency = (typeof CURRENCIES)[number];
+import { SUPPORTED_CURRENCIES as CURRENCIES, Currency } from './currencies';
+export { CURRENCIES };
+export type { Currency };
 export const TRANSFER_STATUSES = ['PENDING', 'PROCESSING', 'AWAITING_RETRY', 'COMPENSATING', 'COMPLETED', 'FAILED'] as const;
 export type TransferStatus = (typeof TRANSFER_STATUSES)[number];
 export const TRANSFER_STEPS = ['RISK_CHECK', 'RESOLVE_RECIPIENT', 'FX_QUOTE', 'HOLD', 'CONFIRM', 'CAPTURE', 'RELEASE_HOLD', 'DONE'] as const;

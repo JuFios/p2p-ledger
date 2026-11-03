@@ -1,6 +1,6 @@
 import { IsIn } from 'class-validator';
 
-export const SUPPORTED_CURRENCIES = ['USD', 'EUR', 'UAH'];
+import { SUPPORTED_CURRENCIES } from '../../common/currencies';
 
 export class CreateWalletDto {
   @IsIn(SUPPORTED_CURRENCIES)

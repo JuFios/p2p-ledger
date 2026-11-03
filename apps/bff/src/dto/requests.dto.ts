@@ -19,11 +19,11 @@ import {
   ValidateNested,
   ValidateIf,
 } from 'class-validator';
-import { IsMoneyAmount } from '../common/is-money-amount';
+import { MAX_AMOUNT, IsMoneyAmount } from '../common/is-money-amount';
 
 import { IsCalendarDate } from '../common/is-calendar-date';
 
-const CURRENCIES = ['USD', 'EUR', 'UAH'];
+import { SUPPORTED_CURRENCIES } from '../common/currencies';
 export class LoginDto {
   @ApiProperty() @IsEmail() email: string;
   @ApiProperty() @IsString() password: string;
@@ -36,25 +36,25 @@ export class RefreshDto {
   @ApiProperty() @IsString() refreshToken: string;
 }
 export class CreateWalletDto {
-  @ApiProperty({ enum: CURRENCIES }) @IsIn(CURRENCIES) currency: string;
+  @ApiProperty({ enum: SUPPORTED_CURRENCIES }) @IsIn(SUPPORTED_CURRENCIES) currency: string;
 }
 export class MoneyDto {
-  @ApiProperty({ minimum: 0.01, maximum: 1000000, multipleOf: 0.01 })
+  @ApiProperty({ minimum: 0.01, maximum: MAX_AMOUNT, multipleOf: 0.01 })
   @IsMoneyAmount()
   amount: number;
 }
 export class CreateTransferDto extends MoneyDto {
   @ApiProperty({ format: 'uuid' }) @IsUUID() fromWalletId: string;
   @ApiProperty({ format: 'email' }) @IsEmail() toWalletIdentifier: string;
-  @ApiProperty({ enum: CURRENCIES }) @IsIn(CURRENCIES) currency: string;
-  @ApiPropertyOptional({ enum: CURRENCIES })
+  @ApiProperty({ enum: SUPPORTED_CURRENCIES }) @IsIn(SUPPORTED_CURRENCIES) currency: string;
+  @ApiPropertyOptional({ enum: SUPPORTED_CURRENCIES })
   @IsOptional()
-  @IsIn(CURRENCIES)
+  @IsIn(SUPPORTED_CURRENCIES)
   toCurrency?: string;
 }
 export class SplitParticipantDto {
   @ApiProperty({ format: 'email' }) @IsEmail() email: string;
-  @ApiPropertyOptional({ minimum: 0.01, maximum: 1000000 })
+  @ApiPropertyOptional({ minimum: 0.01, maximum: MAX_AMOUNT })
   @ValidateIf((_object, value) => value !== undefined)
   @IsMoneyAmount()
   amount?: number;
@@ -66,10 +66,10 @@ export class CreateSplitBillDto {
   @IsNotEmpty()
   @MaxLength(100)
   title: string;
-  @ApiProperty({ minimum: 0.01, maximum: 1000000 })
+  @ApiProperty({ minimum: 0.01, maximum: MAX_AMOUNT })
   @IsMoneyAmount()
   totalAmount: number;
-  @ApiProperty({ enum: CURRENCIES }) @IsIn(CURRENCIES) currency: string;
+  @ApiProperty({ enum: SUPPORTED_CURRENCIES }) @IsIn(SUPPORTED_CURRENCIES) currency: string;
   @ApiProperty({ enum: ['EQUAL', 'CUSTOM'] })
   @IsIn(['EQUAL', 'CUSTOM'])
   mode: string;

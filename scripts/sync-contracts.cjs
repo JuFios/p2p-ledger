@@ -28,4 +28,6 @@ for (const service of ['bff', 'ledger-service', 'payments-service']) sync('contr
 for (const service of ['ledger-service', 'payments-service']) sync('contracts/outbox-contract.spec.ts', `apps/${service}/test/outbox-contract.spec.ts`);
 for (const service of ['bff', 'ledger-service', 'payments-service', 'notifications-service']) sync('contracts/config-policy.ts', `apps/${service}/src/config/config-policy.ts`);
 for (const service of ['bff', 'ledger-service', 'payments-service', 'notifications-service']) sync('contracts/config-policy.spec.ts', `apps/${service}/test/config-policy.spec.ts`);
+for (const service of ['bff', 'ledger-service', 'payments-service', 'notifications-service']) sync('contracts/currencies.ts', `apps/${service}/src/common/currencies.ts`);
+sync('contracts/currencies.ts', 'apps/frontend/lib/currencies.ts');
 if (stale) process.exitCode = 1;

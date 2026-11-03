@@ -1,5 +1,7 @@
 'use client';
 
+import { POLL_INTERVAL_MS } from '@/lib/timing';
+
 import { LocalTime } from '@/components/local-time';
 
 import { useEffect, useRef, useState } from 'react';
@@ -124,7 +126,7 @@ export function BillDetails({
         .catch((err) => {
           if (!stopped) setError((err as Error).message);
         });
-    }, 2000);
+    }, POLL_INTERVAL_MS);
     return () => {
       stopped = true;
       clearInterval(timer);

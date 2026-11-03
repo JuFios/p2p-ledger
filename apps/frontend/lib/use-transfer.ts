@@ -1,5 +1,7 @@
 'use client';
 
+import { POLL_INTERVAL_MS } from '@/lib/timing';
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clientFetch } from './http';
 import { isFinal, parseTransfer, Transfer, TransferUpdate } from './types';
@@ -52,7 +54,7 @@ export function useTransfer() {
     let timer: ReturnType<typeof setTimeout> | undefined;
     async function poll() {
       await refresh();
-      if (!stopped) timer = setTimeout(() => void poll(), 2000);
+      if (!stopped) timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
     }
     void poll();
     return () => {

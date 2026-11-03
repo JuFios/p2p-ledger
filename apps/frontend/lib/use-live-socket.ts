@@ -1,5 +1,7 @@
 'use client';
 
+import { SOCKET_RETRY_MS } from '@/lib/timing';
+
 import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { Activity, validWalletUpdate, validTransferUpdate, TransferUpdate, WalletUpdate } from './types';
@@ -23,7 +25,7 @@ export function useLiveSocket(handlers: LiveHandlers) {
     let retry: ReturnType<typeof setTimeout> | undefined;
     const schedule = (fn: () => void) => {
       clearTimeout(retry);
-      if (!stopped) retry = setTimeout(fn, 3000);
+      if (!stopped) retry = setTimeout(fn, SOCKET_RETRY_MS);
     };
     async function start() {
       try {

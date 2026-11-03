@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { Request, Response } from 'express';
 import { Method } from 'axios';
 
-import { httpBudget } from '../common/http-budget';
+import { DEFAULT_LEDGER_TIMEOUT_MS, httpBudget } from '../common/http-budget';
 
 const SOURCES = {
   ledger: 'LEDGER_SERVICE_URL',
@@ -24,7 +24,7 @@ export class UpstreamService {
     private readonly http: HttpService,
     private readonly config: ConfigService,
   ) {
-    this.timeoutMs = httpBudget(Number(config.get('CB_TIMEOUT_MS', 3000))).bff;
+    this.timeoutMs = httpBudget(Number(config.get('CB_TIMEOUT_MS', DEFAULT_LEDGER_TIMEOUT_MS))).bff;
   }
 
   async request<T = unknown>(

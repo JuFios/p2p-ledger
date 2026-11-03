@@ -1,5 +1,5 @@
 import { IsIn, IsUUID } from 'class-validator';
-import { SUPPORTED_CURRENCIES } from '../../wallets/dto/create-wallet.dto';
+import { SUPPORTED_CURRENCIES } from '../../common/currencies';
 
 export class EnsureWalletDto {
   @IsUUID()

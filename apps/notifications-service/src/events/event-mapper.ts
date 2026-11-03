@@ -1,3 +1,4 @@
+import { SUPPORTED_CURRENCIES } from '../common/currencies';
 import { isUUID } from 'class-validator';
 import { ActivityType } from '../activity/activity.entity';
 
@@ -106,7 +107,7 @@ export function mapEvent(event: IntegrationEvent): {
         throw new Error('Wallet owner missing from userIds');
       const balanceAfter = record(wallet.balanceAfter);
       const total = money(balanceAfter.available) + money(balanceAfter.held);
-      if (!['USD', 'EUR', 'UAH'].includes(String(wallet.currency)))
+      if (!SUPPORTED_CURRENCIES.some((currency) => currency === wallet.currency))
         throw new Error('Invalid currency');
       if (emitsBalance)
         pushes.push({
