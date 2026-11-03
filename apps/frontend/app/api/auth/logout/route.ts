@@ -1,4 +1,4 @@
-import { FRONTEND_TIMEOUT_MS } from '@/lib/server-config';
+import { BFF_URL, FRONTEND_TIMEOUT_MS } from '@/lib/server-config';
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(req: NextRequest) {
@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
   const refreshToken = req.cookies.get('refreshToken')?.value;
   if (refreshToken) {
     try {
-      await fetch(`${process.env.BFF_URL ?? 'http://localhost:3004'}/auth/logout`, {
+      await fetch(`${BFF_URL}/auth/logout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken }),

@@ -1,10 +1,9 @@
-import { FRONTEND_TIMEOUT_MS } from './server-config';
+import { BFF_URL, FRONTEND_TIMEOUT_MS } from './server-config';
 import { cookies } from 'next/headers';
 
 import { ApiError, readResponse } from './http';
 export { ApiError } from './http';
 
-const BFF_URL = process.env.BFF_URL ?? 'http://localhost:3004';
 
 export async function bffFetch<T>(
   path: string,

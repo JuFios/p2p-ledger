@@ -11,7 +11,8 @@ import {
   EmptyState,
   Skeleton,
 } from '@/components/ui/index';
-import { dayLabel, failureLabel, money, timeLabel } from '@/lib/format';
+import { failureLabel, money } from '@/lib/format';
+import { LocalTime, useLocalTime, formatLocalTime } from '@/components/local-time';
 
 const labels: Record<string, string> = {
   DEPOSIT: 'Поповнення',
@@ -58,9 +59,10 @@ export function ActivityFeed({
     onConnect: reload,
     onActivity: () => void reload(),
   });
+  const local = useLocalTime();
   const groups = new Map<string, Activity[]>();
   for (const item of items) {
-    const day = dayLabel(item.createdAt);
+    const day = formatLocalTime(item.createdAt, 'date', local);
     groups.set(day, [...(groups.get(day) ?? []), item]);
   }
   return (
@@ -139,14 +141,19 @@ export function ActivityFeed({
       )}
       {Array.from(groups, ([day, entries]) => (
         <section key={day}>
-          <h2 className="mb-3 text-sm text-muted">{day}</h2>
+          <h2 className="mb-3 text-sm text-muted">
+            <LocalTime value={entries[0].createdAt} format="day" />
+          </h2>
           <Card className="divide-y py-0 sm:py-0">
             {entries.map((item) => {
+              const received = item.type === 'TRANSFER_RECEIVED';
               const incoming =
-                item.type === 'DEPOSIT' || item.type === 'TRANSFER_RECEIVED';
+                item.type === 'DEPOSIT' || received;
               const outgoing =
                 item.type === 'WITHDRAWAL' || item.type === 'TRANSFER_SENT';
               const failed = item.type === 'TRANSFER_FAILED';
+              const amount = received ? item.payload.toAmount : item.payload.amount;
+              const currency = received ? item.payload.toCurrency : item.payload.currency;
               return (
                 <div
                   key={item.id}
@@ -185,24 +192,23 @@ export function ActivityFeed({
                       <h3 className="text-sm">
                         {labels[item.type] ?? item.type}
                       </h3>
-                      {typeof item.payload.amount === 'string' && (
+                      {typeof amount === 'string' && (
                         <p
                           className={`amount whitespace-nowrap text-sm font-semibold ${incoming ? 'text-positive' : failed ? 'text-negative' : ''}`}
                         >
                           {incoming ? '+' : outgoing ? '−' : ''}
-                          {money(item.payload.amount)}{' '}
+                          {money(amount)}{' '}
                           <span className="text-xs font-normal text-muted">
-                            {String(item.payload.currency ?? '')}
+                            {String(currency ?? '')}
                           </span>
                         </p>
                       )}
                     </div>
-                    <time
+                    <LocalTime
                       className="mt-1 block text-xs text-muted"
-                      dateTime={item.createdAt}
-                    >
-                      {timeLabel(item.createdAt)}
-                    </time>
+                      value={item.createdAt}
+                      format="time"
+                    />
                     {typeof item.payload.title === 'string' && (
                       <p className="muted mt-2 break-words">
                         {item.payload.title}

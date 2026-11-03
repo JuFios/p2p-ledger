@@ -56,17 +56,25 @@ for (const staleFailure of [false, true]) {
   });
 }
 
-test('response parsers reject unknown states and unexpected response shapes', () => {
+test('response parsers preserve new states but reject malformed states and response shapes', () => {
   const { parseWallet, parseTransfer, parseBill, parseList, validTransferUpdate } = loadSource('lib/types.ts');
   const transfer = { status: 'COMPLETED', step: 'DONE', currency: 'USD', toCurrency: 'USD' };
   const bill = { status: 'PENDING', mode: 'CUSTOM', currency: 'USD', shares: [] };
   for (const value of [
-    { ...transfer, status: 'COMPELTED' }, { ...transfer, step: 'RESERVE' },
     { ...transfer, currency: 'GBP' }, { ...transfer, toCurrency: 'GBP' },
   ]) assert.throws(() => parseTransfer(value), /невідомий стан/);
   assert.throws(() => parseWallet({ currency: 'GBP' }), /невідомий стан/);
   assert.throws(() => parseBill({ ...bill, mode: 'RANDOM' }), /невідомий стан/);
-  assert.throws(() => parseBill({ ...bill, shares: [{ status: 'SETTLED' }] }), /невідомий стан/);
+  assert.equal(parseTransfer({ ...transfer, status: 'FUTURE' }).status, 'FUTURE');
+  assert.equal(parseTransfer({ ...transfer, step: 'RESERVE' }).step, 'RESERVE');
+  assert.equal(parseBill({ ...bill, status: 'ARCHIVED' }).status, 'ARCHIVED');
+  assert.equal(parseBill({ ...bill, shares: [{ status: 'SETTLED' }] }).shares[0].status, 'SETTLED');
+  for (const state of [null, undefined, '', ' ', 42, {}]) {
+    assert.throws(() => parseTransfer({ ...transfer, status: state }));
+    assert.throws(() => parseTransfer({ ...transfer, step: state }));
+    assert.throws(() => parseBill({ ...bill, status: state }));
+    assert.throws(() => parseBill({ ...bill, shares: [{ status: state }] }));
+  }
   for (const value of [null, undefined, { items: [] }]) {
     assert.throws(() => parseList(parseWallet)(value), /некоректний список/);
     assert.throws(() => parseTransfer(value));
@@ -82,7 +90,7 @@ test('split payment explicitly parses its transfer response', async (t) => {
   assert.deepEqual(await clientFetch('/split-bills/bill/shares/share/pay', undefined, parseTransfer), transfer);
 });
 
-test('BillDetails hydrates the same due date from UTC into a Kyiv browser', async () => {
+test('BillDetails hydrates UTC markup then displays the browser due date', async () => {
   const { renderToString } = require('react-dom/server');
   const { hydrateRoot } = require('react-dom/client');
   const { BillDetails } = loadSource('app/split-bills/[id]/bill-details.tsx', {
@@ -101,13 +109,14 @@ test('BillDetails hydrates the same due date from UTC into a Kyiv browser', asyn
     const container = document.getElementById('root');
     container.innerHTML = renderToString(element);
     const serverText = container.textContent;
-    process.env.TZ = 'Europe/Kyiv';
+    process.env.TZ = 'Europe/Berlin';
     await act(async () => {
       root = hydrateRoot(container, element, { onRecoverableError: error => errors.push(error.message) });
     });
     assert.deepEqual(errors, []);
-    assert.equal(container.textContent, serverText);
-    assert.match(serverText, /2 січ/);
+    assert.match(serverText, /1 січ/);
+    assert.match(container.textContent, /2 січ/);
+    assert.notEqual(container.textContent, serverText);
   } finally {
     if (root) await act(async () => root.unmount());
     if (previous === undefined) delete process.env.TZ;

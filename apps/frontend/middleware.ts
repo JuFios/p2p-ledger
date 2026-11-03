@@ -1,4 +1,5 @@
-import { FRONTEND_TIMEOUT_MS } from './lib/server-config';
+import { REFRESH_GRACE_MS, ACCESS_REFRESH_MARGIN_MS } from './lib/timing';
+import { BFF_URL, FRONTEND_TIMEOUT_MS } from './lib/server-config';
 import { NextRequest, NextResponse } from 'next/server';
 import { sessionClaims, tokenCookies } from './lib/session';
 
@@ -16,7 +17,7 @@ function refresh(refreshToken: string) {
   if (pending) return pending;
   const request = (async () => {
     const upstream = await fetch(
-      `${process.env.BFF_URL ?? 'http://localhost:3004'}/auth/refresh`,
+      `${BFF_URL}/auth/refresh`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -39,7 +40,7 @@ function refresh(refreshToken: string) {
         refreshing.delete(refreshToken);
         return;
       }
-      const timer = setTimeout(() => refreshing.delete(refreshToken), 30000);
+      const timer = setTimeout(() => refreshing.delete(refreshToken), REFRESH_GRACE_MS);
       (timer as unknown as { unref?: () => void }).unref?.();
     },
     () => refreshing.delete(refreshToken),
@@ -61,7 +62,7 @@ export async function middleware(req: NextRequest) {
     return res;
   };
   const claims = sessionClaims(req.cookies.get('accessToken')?.value);
-  if (claims && claims.exp * 1000 > Date.now() + 10000)
+  if (claims && claims.exp * 1000 > Date.now() + ACCESS_REFRESH_MARGIN_MS)
     return NextResponse.next();
   const refreshToken = req.cookies.get('refreshToken')?.value;
   if (!refreshToken) return reject();

@@ -1,4 +1,4 @@
-import { FRONTEND_TIMEOUT_MS } from '@/lib/server-config';
+import { BFF_URL, FRONTEND_TIMEOUT_MS } from '@/lib/server-config';
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -50,7 +50,7 @@ async function proxy(
   if (key !== null) headers.set('Idempotency-Key', key);
   try {
     const res = await fetch(
-      `${process.env.BFF_URL ?? 'http://localhost:3004'}/${params.path.map(encodeURIComponent).join('/')}${req.nextUrl.search}`,
+      `${BFF_URL}/${params.path.map(encodeURIComponent).join('/')}${req.nextUrl.search}`,
       {
         method: req.method,
         headers,

@@ -10,16 +10,16 @@ import {
   IsOptional,
   IsString,
   MaxLength,
-  ValidateNested,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
 import { SUPPORTED_CURRENCIES } from '../../common/currencies';
 import { IsMoneyAmount } from '../../common/is-money-amount';
 import { SPLIT_MODES, SplitMode } from '../entities/split-bill.entity';
 
-export const MAX_PARTICIPANTS = 20;
+const MAX_PARTICIPANTS = 20;
 
-export class SplitParticipantDto {
+class SplitParticipantDto {
   // Лише email, як і одержувач переказу.
   @IsEmail()
   email: string;

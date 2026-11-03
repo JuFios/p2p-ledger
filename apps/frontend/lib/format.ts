@@ -5,38 +5,7 @@ export function money(value: string | null | undefined) {
   const [whole, fraction] = value.split('.');
   return `${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}${fraction === undefined ? '' : `.${fraction}`}`;
 }
-// Усі дати показуємо в одному поясі, щоб SSR і браузер не розходились.
-const TIME_ZONE = 'Europe/Kyiv';
-const dayKey = (date: Date) =>
-  date.toLocaleDateString('en-CA', { timeZone: TIME_ZONE });
-// Попередній календарний день від ключа YYYY-MM-DD; не залежить від DST.
-function previousDayKey(key: string) {
-  const date = new Date(`${key}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() - 1);
-  return date.toISOString().slice(0, 10);
-}
-export function dateLabel(value: string) {
-  return new Date(value).toLocaleDateString('uk-UA', {
-    timeZone: TIME_ZONE,
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
-}
-export function timeLabel(value: string) {
-  return new Date(value).toLocaleTimeString('uk-UA', {
-    timeZone: TIME_ZONE,
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-export function dayLabel(value: string) {
-  const day = dayKey(new Date(value));
-  const today = dayKey(new Date());
-  if (day === today) return 'Сьогодні';
-  if (day === previousDayKey(today)) return 'Вчора';
-  return dateLabel(value);
-}
+export const LOCALE = 'uk-UA';
 export const statusLabels: Record<TransferStatus | ShareStatus | BillStatus, string> = {
   PENDING: 'Очікує',
   PROCESSING: 'Виконується',
@@ -50,6 +19,11 @@ export const statusLabels: Record<TransferStatus | ShareStatus | BillStatus, str
   PARTIALLY_PAID: 'Частково сплачено',
   SETTLED: 'Рахунок закрито',
 };
+export function statusLabel(status: string, allowed: readonly string[] = Object.keys(statusLabels)) {
+  return allowed.includes(status) && Object.hasOwn(statusLabels, status)
+    ? statusLabels[status as keyof typeof statusLabels]
+    : status;
+}
 export function failureLabel(reason: string) {
   return (
     (

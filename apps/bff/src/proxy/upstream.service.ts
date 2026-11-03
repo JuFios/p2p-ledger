@@ -1,9 +1,8 @@
-import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Request, Response } from 'express';
 import { Method } from 'axios';
-
+import { Request, Response } from 'express';
 import { httpBudget } from '../common/http-budget';
 
 const SOURCES = {
@@ -15,6 +14,16 @@ const SOURCES = {
 export type Source = keyof typeof SOURCES;
 export type ProxyRequest = Pick<Request, 'headers'>;
 
+function failureCategory(error: unknown) {
+  const code = (error as { code?: string })?.code;
+  const timedOut = code === 'ECONNABORTED' || code === 'ETIMEDOUT';
+  const dnsFailure = code === 'ENOTFOUND' || code === 'EAI_AGAIN';
+  if (timedOut) return 'timeout';
+  if (code === 'ECONNREFUSED') return 'connection_refused';
+  if (dnsFailure) return 'dns';
+  return 'transport';
+}
+
 @Injectable()
 export class UpstreamService {
   private readonly logger = new Logger(UpstreamService.name);
@@ -24,7 +33,7 @@ export class UpstreamService {
     private readonly http: HttpService,
     private readonly config: ConfigService,
   ) {
-    this.timeoutMs = httpBudget(Number(config.get('CB_TIMEOUT_MS', 3000))).bff;
+    this.timeoutMs = httpBudget(config.get('CB_TIMEOUT_MS'), 'bff');
   }
 
   async request<T = unknown>(
@@ -45,12 +54,13 @@ export class UpstreamService {
       }
     }
     const started = Date.now();
+    const method = options.method ?? 'GET';
     try {
       return await this.http.axiosRef.request<T>({
         url:
           this.config.getOrThrow<string>(SOURCES[source]).replace(/\/$/, '') +
           path,
-        method: options.method ?? 'GET',
+        method,
         data: options.body,
         params: options.query,
         headers,
@@ -59,12 +69,13 @@ export class UpstreamService {
         validateStatus: () => true,
       });
     } catch (error) {
-      const code = (error as { code?: string })?.code;
-      const category = code === 'ECONNABORTED' || code === 'ETIMEDOUT'
-        ? 'timeout' : code === 'ECONNREFUSED' ? 'connection_refused'
-          : code === 'ENOTFOUND' || code === 'EAI_AGAIN' ? 'dns' : 'transport';
-      this.logger.warn({ category, source, method: options.method ?? 'GET',
-        path: path.split('?')[0], durationMs: Date.now() - started }, 'Upstream request failed');
+      this.logger.warn({
+        category: failureCategory(error),
+        source,
+        method,
+        path: path.split('?')[0],
+        durationMs: Date.now() - started,
+      }, 'Upstream request failed');
       throw new ServiceUnavailableException('Upstream service unavailable');
     }
   }

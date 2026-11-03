@@ -4,6 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { readListenPort } from './config/runtime-env';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
@@ -24,7 +25,7 @@ async function bootstrap() {
       .build(),
   );
   SwaggerModule.setup('docs', app, document);
-  const port = process.env.PORT ?? 3001;
+  const port = readListenPort();
   await app.listen(port);
   app.get(Logger).log(`ledger-service listening on ${port}`);
 }

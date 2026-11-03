@@ -15,6 +15,11 @@ import { KNOWN_TYPES, parseEnvelope } from './event-mapper';
 export const STREAMS = ['stream:ledger-events', 'stream:payments-events'];
 export const GROUP = 'notifications';
 export const DEAD_LETTER_STREAM = 'stream:dead-letter';
+const CONSUMER_BATCH_SIZE = 20;
+const STREAM_BLOCK_MS = 500;
+const CONSUMER_RETRY_MS = 250;
+const REDIS_COMMAND_TIMEOUT_MS = 3000;
+
 type Entry = [string, string[]];
 type ReadResult = [string, Entry[]][];
 
@@ -43,7 +48,7 @@ export class StreamConsumer
       host: config.getOrThrow<string>('REDIS_HOST'),
       port: config.getOrThrow<number>('REDIS_PORT'),
       maxRetriesPerRequest: 1,
-      commandTimeout: 3000,
+      commandTimeout: REDIS_COMMAND_TIMEOUT_MS,
     });
     this.reader = this.redis.duplicate();
     for (const client of [this.redis, this.reader])
@@ -73,9 +78,9 @@ export class StreamConsumer
             GROUP,
             this.name,
             'COUNT',
-            20,
+            CONSUMER_BATCH_SIZE,
             'BLOCK',
-            500,
+            STREAM_BLOCK_MS,
             'STREAMS',
             ...STREAMS,
             ...STREAMS.map(() => '>'),
@@ -90,7 +95,7 @@ export class StreamConsumer
       } catch (error) {
         if (!this.stopped) {
           this.logger.warn(`Consumer retry: ${(error as Error).message}`);
-          await new Promise((resolve) => setTimeout(resolve, 250));
+          await new Promise((resolve) => setTimeout(resolve, CONSUMER_RETRY_MS));
         }
       }
     }
@@ -114,7 +119,7 @@ export class StreamConsumer
       this.idle,
       this.cursors.get(stream)!,
       'COUNT',
-      20,
+      CONSUMER_BATCH_SIZE,
     )) as [string, Entry[], string[]];
     this.cursors.set(stream, cursor);
     for (const entry of entries) {

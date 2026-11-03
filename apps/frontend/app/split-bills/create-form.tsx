@@ -1,5 +1,7 @@
 'use client';
 
+import { MAX_AMOUNT } from '@/lib/validation';
+
 import { useEffect, useRef, useState } from 'react';
 import {
   attemptScope,
@@ -141,7 +143,7 @@ export function CreateBillForm({ userId }: { userId: string }) {
                 defaultValue={restored?.totalAmount}
                 type="number"
                 min="0.01"
-                max="1000000"
+                max={MAX_AMOUNT}
                 step="0.01"
                 placeholder="0.00"
                 required

@@ -1,4 +1,5 @@
 import { DataSource } from 'typeorm';
+import { readDatabaseEnvironment } from './config/runtime-env';
 import { User } from './auth/entities/user.entity';
 import { Wallet } from './wallets/entities/wallet.entity';
 import { WalletBalance } from './wallets/entities/wallet-balance.entity';
@@ -30,11 +31,7 @@ export const migrations = [
 // через TypeOrmModule.forRoot з тими самими entities і migrations.
 export default new DataSource({
   type: 'postgres',
-  host: process.env.DATABASE_HOST,
-  port: Number(process.env.DATABASE_PORT ?? 5432),
-  username: process.env.DATABASE_USER,
-  password: process.env.DATABASE_PASSWORD,
-  database: process.env.DATABASE_NAME,
+  ...readDatabaseEnvironment(),
   entities,
   migrations,
 });

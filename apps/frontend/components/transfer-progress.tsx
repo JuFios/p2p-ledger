@@ -1,6 +1,6 @@
 'use client';
-import { Transfer } from '@/lib/types';
-import { failureLabel, money, statusLabels } from '@/lib/format';
+import { hasKnownTransferState, Transfer } from '@/lib/types';
+import { failureLabel, money, statusLabel } from '@/lib/format';
 import { Alert, Badge, Card } from './ui/index';
 import { CopyId } from './ui/copy-id';
 const steps = [
@@ -22,9 +22,10 @@ const labels = [
   'Готово',
 ];
 export function TransferProgress({ transfer }: { transfer: Transfer }) {
-  const complete = transfer.status === 'COMPLETED';
-  const failed = transfer.status === 'FAILED';
-  const compensating = transfer.step === 'RELEASE_HOLD';
+  const knownState = hasKnownTransferState(transfer);
+  const complete = knownState && transfer.status === 'COMPLETED';
+  const failed = knownState && transfer.status === 'FAILED';
+  const compensating = knownState && transfer.step === 'RELEASE_HOLD';
   const position = compensating ? 4 : Math.max(0, steps.indexOf(transfer.step));
   return (
     <Card aria-label="Стан переказу" aria-live="polite" className="min-w-0">
@@ -67,7 +68,7 @@ export function TransferProgress({ transfer }: { transfer: Transfer }) {
           ? 'Переказ завершено'
           : failed
             ? 'Переказ не виконано'
-            : (statusLabels[transfer.status] ?? 'Переказ виконується')}
+            : knownState ? statusLabel(transfer.status) : transfer.status}
       </h2>
       <p className="muted mt-2">
         {complete
@@ -76,6 +77,13 @@ export function TransferProgress({ transfer }: { transfer: Transfer }) {
             ? 'Перевірте причину відмови перед новою спробою.'
             : 'Оновлення з’являються автоматично.'}
       </p>
+      {!knownState && (
+        <Alert tone="caution">
+          Новий стан переказу: {transfer.status}. Крок: {transfer.step}.
+          Повторне надсилання вимкнено. Очікуйте оновлення стану.
+        </Alert>
+      )}
+      {knownState && (
       <ol className="my-7 grid grid-cols-7 gap-1" aria-label="Кроки переказу">
         {steps.map((step, i) => {
           const done = complete || i < position;
@@ -98,7 +106,8 @@ export function TransferProgress({ transfer }: { transfer: Transfer }) {
           );
         })}
       </ol>
-      {!complete && !failed && (
+      )}
+      {knownState && !complete && !failed && (
         <p className="mb-5 text-center text-xs text-muted sm:hidden">
           {compensating
             ? 'Повернення резерву'

@@ -2,6 +2,9 @@ import { Inject, Module, OnApplicationShutdown } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
+const REDIS_COMMAND_TIMEOUT_MS = 5000;
+const REDIS_MAX_RETRIES = 3;
+
 export const REDIS = Symbol('REDIS');
 
 @Module({
@@ -11,12 +14,12 @@ export const REDIS = Symbol('REDIS');
       inject: [ConfigService],
       useFactory: (config: ConfigService) =>
         new Redis({
-          host: config.get<string>('REDIS_HOST', 'localhost'),
-          port: Number(config.get('REDIS_PORT', 6379)),
+          host: config.getOrThrow<string>('REDIS_HOST'),
+          port: config.getOrThrow<number>('REDIS_PORT'),
           // Команда не висить вічно, поки Redis недоступний: relay тримає
           // відкриту транзакцію БД, доки чекає на XADD.
-          maxRetriesPerRequest: 3,
-          commandTimeout: 5000,
+          maxRetriesPerRequest: REDIS_MAX_RETRIES,
+          commandTimeout: REDIS_COMMAND_TIMEOUT_MS,
         }),
     },
   ],

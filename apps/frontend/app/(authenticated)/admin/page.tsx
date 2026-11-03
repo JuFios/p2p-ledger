@@ -8,12 +8,13 @@ import {
   Badge,
   Card,
   EmptyState,
-  Field,
   PageHeading,
   Skeleton,
 } from '@/components/ui/index';
 import { CopyId } from '@/components/ui/copy-id';
-import { dateLabel, money } from '@/lib/format';
+import { money } from '@/lib/format';
+import { LocalTime } from '@/components/local-time';
+import { PeriodFilter } from '@/app/admin/period-filter';
 
 interface Reconciliation {
   ok: boolean;
@@ -97,9 +98,7 @@ async function Events({ walletId }: { walletId?: string }) {
             <span className="absolute -left-8 top-1.5 h-3.5 w-3.5 rounded-full border-2 border-surface bg-accent" />
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="break-all text-sm">{event.type}</h3>
-              <time className="text-xs text-muted" dateTime={event.recordedAt}>
-                {dateLabel(event.recordedAt)}
-              </time>
+              <LocalTime className="text-xs text-muted" value={event.recordedAt} format="datetime" />
             </div>
             <CopyId value={event.eventId} />
             <details className="mt-1 rounded-lg bg-canvas p-3 text-sm">
@@ -296,33 +295,7 @@ export default async function AdminPage({
         description="Перевіряйте облік і досліджуйте шлях кожного переказу."
       />
       <Card className="mb-6">
-        <form
-          method="get"
-          className="grid items-end gap-4 md:grid-cols-2 lg:grid-cols-4"
-        >
-          <Field id="wallet-id" label="ID гаманця">
-            <input
-              name="walletId"
-              placeholder="UUID гаманця"
-              defaultValue={searchParams.walletId}
-            />
-          </Field>
-          <Field id="period-from" label="Від (YYYY-MM-DD або дата-час із Z/±hh:mm)">
-            <input
-              name="from"
-              placeholder="2026-11-01T00:00:00Z"
-              defaultValue={searchParams.from}
-            />
-          </Field>
-          <Field id="period-to" label="До (YYYY-MM-DD або дата-час із Z/±hh:mm)">
-            <input
-              name="to"
-              placeholder="2026-11-02T00:00:00Z"
-              defaultValue={searchParams.to}
-            />
-          </Field>
-          <button className="button-primary">Показати</button>
-        </form>
+        <PeriodFilter walletId={searchParams.walletId} from={searchParams.from} to={searchParams.to} />
       </Card>
       <nav
         aria-label="Розділи адміністрування"
