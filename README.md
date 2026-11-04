@@ -416,6 +416,7 @@ available/held/frozen. Витрати обмежені available, frozen бло�
 | Frontend format/BillDetails | UTC SSR → пояс браузера замість фіксованого поясу; перевірки hydration, DST і включного календаря. |
 | Payments split-validation | Два direct-call null тести проходять реальний ValidationPipe → сервіс: null відхиляється до hash/БД, з ключем і без. HTTP e2e збережено. |
 | BFF Jaeger, frontend login HTTP | Додано перевірки `X-Forwarded-For`: IP клієнта не йде в Jaeger, login передає його в BFF. Traces шукаються за першим кроком саги `saga.step RISK_CHECK` замість кореневого `POST /transfers`, щоб охопити й оплату частки; порядок і тривалість спроб перевіряються як раніше. |
+| Tracing-env (усі сервіси) | Таймаут дочірнього процесу 15 → 60 с: на завантаженій машині старт ts-node і OTel SDK не вкладався в 15 с. Перевірка експорту в collector і `service.name` з `.env` та сама. |
 
 Регресійні тести охоплюють переставлені відповіді polling/live/manual і збереження помилки гаманців до успішного повного оновлення,
 DST опівночі, logout за проксі, конкурентну реєстрацію на PostgreSQL, ліміт невдалих логінів за IP (успішні входи й паралельні спроби)

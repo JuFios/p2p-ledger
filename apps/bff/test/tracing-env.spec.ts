@@ -42,6 +42,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:${address.port}
     };
     for (const key of Object.keys(env))
       if (key.startsWith('OTEL_')) delete env[key];
+    // Таймаут із запасом: зазвичай процес стартує за секунду, але під
+    // навантаженням машини ts-node і OTel SDK запускаються десятки секунд.
     await promisify(execFile)(
       process.execPath,
       [
@@ -50,7 +52,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:${address.port}
         '-e',
         script,
       ],
-      { cwd: directory, env, timeout: 15000 },
+      { cwd: directory, env, timeout: 60_000 },
     );
     const traces = requests.filter((request) => request.path === '/v1/traces');
     expect(traces).toHaveLength(1);
@@ -63,4 +65,4 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:${address.port}
     await new Promise<void>((done) => server.close(() => done()));
     rmSync(directory, { recursive: true, force: true });
   }
-}, 20000);
+}, 90_000);
