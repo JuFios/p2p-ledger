@@ -416,6 +416,7 @@ available/held/frozen. Витрати обмежені available, frozen бло�
 | Frontend format/BillDetails | UTC SSR → пояс браузера замість фіксованого поясу; перевірки hydration, DST і включного календаря. |
 | Payments split-validation | Два direct-call null тести проходять реальний ValidationPipe → сервіс: null відхиляється до hash/БД, з ключем і без. HTTP e2e збережено. |
 | BFF Jaeger, frontend login HTTP | Додано перевірки `X-Forwarded-For`: IP клієнта не йде в Jaeger, login передає його в BFF. Traces шукаються за першим кроком саги `saga.step RISK_CHECK` замість кореневого `POST /transfers`, щоб охопити й оплату частки; порядок і тривалість спроб перевіряються як раніше. |
+| Payments e2e: HTTP-двійник ledger | Як і ledger, двійник запам’ятовує відмову place (409) під operationId і повертає її на повтор. Release і capture у двійнику без змін. |
 | Tracing-env (усі сервіси) | Таймаут дочірнього процесу 15 → 60 с: на завантаженій машині старт ts-node і OTel SDK не вкладався в 15 с. Перевірка експорту в collector і `service.name` з `.env` та сама. |
 
 Регресійні тести охоплюють переставлені відповіді polling/live/manual і збереження помилки гаманців до успішного повного оновлення,
@@ -509,7 +510,8 @@ Middleware оновлює access через refresh; паралельні refres
 успішна пара кешується на 30 с для запізнілих запитів зі старою cookie.
 Тимчасовий збій refresh лишає cookie: API отримує JSON 503, сторінка — HTML 503 з повтором.
 Login передає `Retry-After` ліміту, некоректне тіло запиту отримує 400, а відповідь BFF
-без пари токенів — 502 без cookie.
+без пари токенів — 502 без cookie. Статус BFF (зокрема 401 за невірних даних) передається
+як є; непередбачений збій маршруту — 500, а не «невірний пароль».
 Logout відкликає sid і очищає cookie; уже виданий access живе до свого exp.
 `/api/auth/ws-token` віддає access у пам’ять сторінки для handshake; refresh лишається
 в httpOnly-cookie. Cookie: SameSite=Lax, Secure при HTTPS. У localStorage токенів немає.
@@ -572,6 +574,10 @@ Connect/reconnect перечитує REST-стан; після JWT exp соке�
   в ledger на кожен запит.
 - Access JWT підписуються HS256 спільним `JWT_ACCESS_SECRET`: видає лише ledger,
   решта перевіряє, але технічно будь-який сервіс із секретом може підписати токен.
+  BFF, payments і notifications приймають лише HS256 і UUID у `sub` (спільна перевірка
+  з `contracts/`). Стратегія ledger лишилась стартовою (змінено лише відмову від
+  запасного секрету): вона не обмежує HMAC-алгоритм і формат `sub`, бо ТЗ просить
+  не переписувати auth без потреби. Без секрету такий токен не підписати.
   Компроміс прийнято, бо всі сервіси в одній зоні довіри Compose і вже ділять
   `INTERNAL_API_TOKEN`. Для окремих зон довіри — RS256/ES256: приватний ключ лише
   в ledger, публічний або JWKS у решти; refresh лишається внутрішнім для ledger.
