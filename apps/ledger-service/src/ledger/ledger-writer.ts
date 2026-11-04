@@ -1,5 +1,3 @@
-import { context, propagation } from '@opentelemetry/api';
-import { createHash } from 'crypto';
 import { EntityManager, In } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { EventStore, NewEvent, RecordedEvent } from './event-store';
@@ -9,34 +7,15 @@ import { Operation } from './entities/operation.entity';
 import { OutboxMessage } from './entities/outbox-message.entity';
 import { idempotencyKeyReused } from './ledger-errors';
 import { WalletBalance } from '../wallets/entities/wallet-balance.entity';
+import { hashRequest } from '../common/request-hash';
+import { currentTraceparent } from '../common/tracing';
 
 // Спільний шлях запису всіх команд ledger. Виконується в транзакції викликача
 // після блокування рядків wallet_balances зачеплених гаманців.
 
-// Канонічний JSON (ключі відсортовано): хеш не залежить від порядку полів,
-// у якому клієнт серіалізував тіло запиту.
-function canonical(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value === null || typeof value !== 'object') return value;
-  return Object.fromEntries(
-    Object.keys(value)
-      .sort()
-      .map((key) => [key, canonical((value as Record<string, unknown>)[key])]),
-  );
-}
-
-export function hashRequest(request: unknown): string {
-  return createHash('sha256')
-    .update(JSON.stringify(canonical(request)))
-    .digest('hex');
-}
-
-// W3C traceparent активного контексту OpenTelemetry (null, поки SDK не підключено).
-export function currentTraceparent(): string | null {
-  const carrier: Record<string, string> = {};
-  propagation.inject(context.active(), carrier);
-  return carrier.traceparent ?? null;
-}
+// Хеш запиту й traceparent — спільні контракти (contracts/); реекспорт, щоб
+// команди ledger брали все для запису з одного модуля.
+export { hashRequest, currentTraceparent };
 
 export function toState(balance: WalletBalance): WalletBalanceState {
   return { available: BigInt(balance.available), held: BigInt(balance.held) };
