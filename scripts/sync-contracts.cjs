@@ -36,4 +36,8 @@ for (const service of ['ledger-service', 'payments-service']) {
   sync('contracts/request-hash.ts', `apps/${service}/src/common/request-hash.ts`);
   sync('contracts/tracing.ts', `apps/${service}/src/common/tracing.ts`);
 }
+for (const service of ['bff', 'payments-service', 'notifications-service']) {
+  sync('contracts/jwt.strategy.ts', `apps/${service}/src/auth/jwt.strategy.ts`);
+  sync('contracts/jwt-strategy.spec.ts', `apps/${service}/test/jwt-strategy.spec.ts`);
+}
 if (stale) process.exitCode = 1;
