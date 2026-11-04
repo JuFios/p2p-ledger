@@ -59,15 +59,16 @@ docker compose up --build
 Compose читає `.env.example` кожного пакета; копіювати файли для цього запуску
 не потрібно. Для запуску у фоні з очікуванням готовності:
 `docker compose up -d --build --wait --wait-timeout 180`.
-Усі опубліковані порти прив’язані до `127.0.0.1`.
+Усі опубліковані порти прив’язані до `127.0.0.1`. Порти 3000 і 3004 публікує nginx
+([proxy/nginx.conf](proxy/nginx.conf)) — єдиний публічний вхід до frontend і BFF.
 
 | Компонент | Адреса / порт хоста | Призначення |
 |---|---|---|
-| Frontend | [localhost:3000](http://localhost:3000) | Гаманці, перекази, рахунки, активність, адмінка |
+| Frontend | [localhost:3000](http://localhost:3000) через proxy | Гаманці, перекази, рахунки, активність, адмінка |
 | Ledger | [Swagger :3001](http://localhost:3001/docs) | Auth, гаманці, holds, event-лог, reconciliation |
 | Payments | [Swagger :3002](http://localhost:3002/docs) | Перекази та split-рахунки |
 | Notifications | [Swagger :3003](http://localhost:3003/docs) | Activity та Socket.IO `/ws` |
-| BFF | [Swagger :3004](http://localhost:3004/docs) | Публічний REST API та `/dashboard` |
+| BFF | [Swagger :3004](http://localhost:3004/docs) через proxy | Публічний REST API та `/dashboard` |
 | Jaeger | [UI :16686](http://localhost:16686), OTLP HTTP 4318 | Traces та Query API |
 | PostgreSQL | ledger 5433, payments 5434, notifications 5435 | Усередині мережі кожна БД на 5432 |
 | Redis | 6379 | Усередині мережі `redis:6379` |
@@ -128,14 +129,17 @@ Compose явно задає `NODE_ENV=development`; runtime-образи Nest з
 `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318`. У frontend використайте
 `BFF_URL=http://localhost:3004`, `WS_PUBLIC_URL=http://localhost:3003`.
 У пакеті: `npm ci`, потім `npm run start:dev` (backend) або `npm run dev` (frontend).
-Зупиніть контейнер сервісу перед хостовим запуском на тому самому порту.
+Зупиніть контейнер сервісу перед хостовим запуском на тому самому порту;
+для frontend і BFF порт тримає `proxy`.
 
 ## Архітектура та вибір технологій
 
 ```mermaid
 flowchart TB
-  U[Браузер] -->|HTTP| F[Next.js :3000]
-  F -->|HTTP + JWT| B[BFF :3004]
+  U[Браузер] -->|HTTP :3000 / :3004| X[nginx proxy]
+  X -->|HTTP| F[Next.js]
+  X -->|HTTP: API-клієнти| B
+  F -->|HTTP + JWT| B[BFF]
   B -->|HTTP: auth / wallets / admin| L[ledger-service :3001]
   B -->|HTTP: transfers / split-bills| P[payments-service :3002]
   B -->|HTTP: activity| N[notifications-service :3003]
@@ -380,7 +384,7 @@ notifications у фактичному стартері не було, попри
 | Notifications-заглушка → БД/activity/consumer/WS | Ідемпотентні сповіщення та real-time. |
 | Bootstrap/AppModule трьох backend | Ранній tracing, Pino, Swagger, валідація, health БД/Redis, завершення воркерів і SDK на SIGTERM. Redis down — деградація без зупинки ledger/REST activity. |
 | Frontend api/layout/wallets | BFF, SSR + live, refresh, навігація після входу; `(authenticated)` усуває кешовану анонімну шапку. Tailwind і локальний Inter. |
-| Compose/Docker/CI | Додано БД, Redis, BFF, Jaeger, healthcheck; AOF/том Redis та localhost-порти. Окремі test/build/runtime targets, npm ci, USER node; CI для кожного пакета й system/race. |
+| Compose/Docker/CI | Додано БД, Redis, BFF, Jaeger, nginx-proxy перед frontend/BFF, healthcheck; AOF/том Redis та localhost-порти. Окремі test/build/runtime targets, npm ci, USER node; CI для кожного пакета й system/race. |
 
 Зміни контрактів: balance лишився рядком, тепер `available + held`; додано
 available/held/frozen. Витрати обмежені available, frozen блокує гроші, крім release.
@@ -487,8 +491,10 @@ Login лімітується за email (`LOGIN_RATE_LIMIT`) і окремо з�
 клієнта (`LOGIN_IP_RATE_LIMIT`) у спільному вікні `LOGIN_RATE_TTL_MS`: другий ліміт
 зупиняє перебір одного пароля по багатьох акаунтах. Спроба резервується до перевірки
 пароля й повертається, якщо відповідь не 401, тож успішні входи за спільним NAT
-ліміт не витрачають, а паралельні запити його не перевищують. Frontend передає IP
-через BFF у `X-Forwarded-For`, ledger бере останній запис. Transfers/pay лімітуються за userId.
+ліміт не витрачають, а паралельні запити його не перевищують. IP визначає nginx:
+він перезаписує `X-Forwarded-For` адресою з'єднання, тож підставлений клієнтом заголовок
+не діє. Frontend і BFF передають це значення далі, ledger бере останній запис.
+Transfers/pay лімітуються за userId.
 `/dashboard` паралельно повертає секції data/error, відмова одного джерела не ховає решту.
 
 Middleware оновлює access через refresh; паралельні refresh об’єднуються в процесі,
@@ -546,9 +552,11 @@ Connect/reconnect перечитує REST-стан; після JWT exp соке�
   Компроміс прийнято, бо всі сервіси в одній зоні довіри Compose і вже ділять
   `INTERNAL_API_TOKEN`. Для окремих зон довіри — RS256/ES256: приватний ключ лише
   в ledger, публічний або JWKS у решти; refresh лишається внутрішнім для ledger.
-- `next start` не перезаписує `X-Forwarded-For` від клієнта. Без reverse proxy,
-  що сам виставляє цей заголовок, IP можна підробити: обійти ліміт за IP або
-  вичерпати ліміт чужої адреси. Ліміт за email від цього не залежить.
+- Ліміт за IP спирається на nginx як на перший hop. Внутрішні сервіси довіряють
+  `X-Forwarded-For` від будь-якого виклику в мережі Compose, тому їх порти мають
+  бути закриті (див. нижче). За зовнішнім балансувальником nginx треба налаштувати
+  `set_real_ip_from`/`real_ip_header`, інакше всі клієнти матимуть адресу балансувальника.
+  Хостовий `npm run dev` працює без proxy, і там заголовок від клієнта не перезаписується.
 - Для публічного розгортання потрібні власні секрети, TLS, закриті БД/Redis/metrics/docs,
   політика upgrade/egress для Next, резервні копії та міграція реальних даних.
   Поточний Compose — локальна демонстрація; готовність до production не заявляється.

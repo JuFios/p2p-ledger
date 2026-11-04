@@ -31,6 +31,8 @@ services:
     ports: !reset []
   frontend:
     ports: !reset []
+  proxy:
+    ports: !reset []
   system-tests:
     profiles: [test]
     build: ./tests/system
