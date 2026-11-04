@@ -18,6 +18,7 @@ services:
     environment:
       <<: *admin-env
       LOGIN_RATE_LIMIT: 1000
+      LOGIN_IP_RATE_LIMIT: 1000
   payments-service:
     ports: !reset []
     environment:
@@ -29,6 +30,8 @@ services:
   bff:
     ports: !reset []
   frontend:
+    ports: !reset []
+  proxy:
     ports: !reset []
   system-tests:
     profiles: [test]

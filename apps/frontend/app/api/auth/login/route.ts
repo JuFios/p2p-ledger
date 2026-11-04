@@ -7,9 +7,13 @@ import { tokenCookies } from '@/lib/session';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    // IP клієнта для ліміту логіну в ledger; next start заповнює x-forwarded-for
+    // адресою з'єднання, якщо його не задав proxy попереду.
+    const forwardedFor = req.headers.get('x-forwarded-for');
     const tokens = await bffFetch<{ accessToken: string; refreshToken: string }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify(body),
+      headers: forwardedFor ? { 'X-Forwarded-For': forwardedFor } : undefined,
     });
     const res = NextResponse.json({ ok: true });
     res.cookies.set('accessToken', tokens.accessToken, tokenCookies(req.nextUrl.protocol === 'https:'));

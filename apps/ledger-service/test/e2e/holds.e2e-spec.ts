@@ -248,6 +248,51 @@ describe('Holds (e2e)', () => {
     });
   });
 
+  // Порядок викликів саги: HOLD → заморозка отримувача → CONFIRM читає
+  // гаманець → RELEASE_HOLD. Звірка має зійтися, зарахування не буває.
+  it('заморозка отримувача між HOLD і CONFIRM: холд знято, баланси й reconciliation зійшлися', async () => {
+    const a = await account(app);
+    const b = await account(app, 'USD', 0);
+    const { holdId } = await placeHold(app, a, '3000');
+    expect((await balanceOf(app, a)).held).toBe('30.00');
+
+    await freeze(app, admin, b.walletId).then((r) => expect(r.status).toBe(200));
+    const confirm = await internal(app).get(`/internal/wallets/${b.walletId}`);
+    expect([confirm.status, confirm.body.frozen]).toEqual([200, true]);
+
+    await release(app, holdId, 'RECIPIENT_FROZEN').then((r) =>
+      expect(r.body).toEqual({ holdId, status: 'RELEASED' }),
+    );
+    const late = await capture(app, holdId, b, '3000');
+    expect([late.status, late.body.code]).toEqual([409, 'HOLD_NOT_ACTIVE']);
+
+    expect(await balanceOf(app, a)).toEqual({
+      balance: '100.00',
+      available: '100.00',
+      held: '0.00',
+    });
+    expect(await balanceOf(app, b)).toEqual({
+      balance: '0.00',
+      available: '0.00',
+      held: '0.00',
+    });
+    expect((await types(a.walletId)).slice(-4)).toEqual([
+      'TransferInitiated',
+      'HoldPlaced',
+      'HoldReleased',
+      'TransferFailed',
+    ]);
+    expect(await types(b.walletId)).toEqual(['WalletOpened', 'WalletFrozen']);
+    await internal(app)
+      .get(`/internal/holds/${holdId}`)
+      .expect(200, { holdId, status: 'RELEASED' });
+
+    const res = await reconciliation(app, admin);
+    expect(res.status).toBe(200);
+    expect(res.body.projectionMismatches).toEqual([]);
+    expect(res.body.ok).toBe(true);
+  });
+
   it('capture із замороженого гаманця відправника → WALLET_FROZEN, held лишається', async () => {
     const a = await account(app);
     const b = await account(app, 'USD', 0);

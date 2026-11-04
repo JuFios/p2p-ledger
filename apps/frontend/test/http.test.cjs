@@ -185,6 +185,14 @@ test('login stores both tokens as HttpOnly SameSite cookies', async () => {
     assert.match(cookie, /SameSite=lax/i);
   }
   assert.deepEqual(await res.json(), { ok: true });
+  assert.match(received.headers['x-forwarded-for'], /127\.0\.0\.1$/);
+});
+test('login passes the client IP from the fronting proxy to BFF', async () => {
+  const init = post({ email: 'user@example.com', password: 'password' });
+  init.headers['X-Forwarded-For'] = '198.51.100.1, 203.0.113.7';
+  const res = await request('/api/auth/login', init);
+  assert.equal(res.status, 200);
+  assert.equal(received.headers['x-forwarded-for'], '198.51.100.1, 203.0.113.7');
 });
 test('register preserves the BFF rejection status', async () => {
   const res = await request('/api/auth/register', post({}));

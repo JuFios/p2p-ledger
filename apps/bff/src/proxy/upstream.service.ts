@@ -12,7 +12,7 @@ const SOURCES = {
   jaeger: 'JAEGER_QUERY_URL',
 } as const;
 export type Source = keyof typeof SOURCES;
-export type ProxyRequest = Pick<Request, 'headers'>;
+export type ProxyRequest = Pick<Request, 'headers'> & Partial<Pick<Request, 'ip'>>;
 
 function failureCategory(error: unknown) {
   const code = (error as { code?: string })?.code;
@@ -52,6 +52,11 @@ export class UpstreamService {
         const value = options.req?.headers[name];
         if (typeof value === 'string') headers[name] = value;
       }
+      // IP клієнта для ліміту логіну в ledger: від frontend як є,
+      // для прямого виклику BFF — адреса з'єднання.
+      const forwarded = options.req?.headers['x-forwarded-for'];
+      const clientIp = typeof forwarded === 'string' ? forwarded : options.req?.ip;
+      if (clientIp) headers['x-forwarded-for'] = clientIp;
     }
     const started = Date.now();
     const method = options.method ?? 'GET';

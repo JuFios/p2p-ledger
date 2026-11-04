@@ -201,6 +201,48 @@ describe('Сага переказу (e2e)', () => {
     }
   });
 
+  it('отримувача заморожено після CONFIRM: capture відхилено, холд знято', async () => {
+    const sender = createUser(ledger, 'USD', 10000n);
+    const recipient = createUser(ledger, 'USD');
+    // CONFIRM ще бачить незаморожений гаманець, заморозка встигає до CAPTURE.
+    const route = ledger['route'].bind(ledger);
+    ledger['route'] = (method: string, path: string, body: Record<string, string>) => {
+      const result = route(method, path, body);
+      if (method === 'GET' && path === `/internal/wallets/${recipient.wallet.walletId}`)
+        recipient.wallet.frozen = true;
+      return result;
+    };
+    try {
+      const res = await postTransfer(app, sender.token, {
+        fromWalletId: sender.wallet.walletId,
+        toWalletIdentifier: recipient.email,
+        amount: 40,
+        currency: 'USD',
+      }).expect(202);
+      const done = await waitForStatus(app, sender.token, res.body.id);
+      expect(done).toMatchObject({
+        status: 'FAILED',
+        step: 'RELEASE_HOLD',
+        failureReason: 'RECIPIENT_FROZEN',
+      });
+      expect(sender.wallet).toMatchObject({ available: 10000n, held: 0n });
+      expect(recipient.wallet.available).toBe(0n);
+      expect(ledger.holds.get(res.body.id)?.status).toBe('RELEASED');
+      expect(await statusEvents(res.body.id)).toEqual([
+        'PENDING/RISK_CHECK',
+        'PROCESSING/RESOLVE_RECIPIENT',
+        'PROCESSING/FX_QUOTE',
+        'PROCESSING/HOLD',
+        'PROCESSING/CONFIRM',
+        'PROCESSING/CAPTURE',
+        'COMPENSATING/RELEASE_HOLD',
+        'FAILED/RELEASE_HOLD',
+      ]);
+    } finally {
+      ledger['route'] = route;
+    }
+  });
+
   it('ledger недоступний: AWAITING_RETRY, після відновлення переказ завершується', async () => {
     const sender = createUser(ledger, 'USD', 10000n);
     const recipient = createUser(ledger, 'USD');
