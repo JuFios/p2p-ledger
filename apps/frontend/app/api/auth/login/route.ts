@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ApiError, bffFetch } from '@/lib/api';
+import { crossOriginRejected, isSameOrigin } from '@/lib/same-origin';
 import { tokenCookies } from '@/lib/session';
 
 // Проксі до BFF, щоб зберігати токени в httpOnly cookie,
 // а не в localStorage на клієнті.
 export async function POST(req: NextRequest) {
+  if (!isSameOrigin(req)) return crossOriginRejected();
   let body: unknown;
   try {
     body = await req.json();

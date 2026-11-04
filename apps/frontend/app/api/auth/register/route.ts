@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ApiError, bffFetch } from '@/lib/api';
+import { crossOriginRejected, isSameOrigin } from '@/lib/same-origin';
 import { tokenCookies } from '@/lib/session';
 
 export async function POST(req: NextRequest) {
+  if (!isSameOrigin(req)) return crossOriginRejected();
   try {
     const body = await req.json();
     const tokens = await bffFetch<{ accessToken: string; refreshToken: string }>('/auth/register', {
