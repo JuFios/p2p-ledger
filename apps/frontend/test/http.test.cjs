@@ -40,6 +40,7 @@ before(async () => {
         res.setHeader('Retry-After', '42');
         return json(res, 429, { message: 'ThrottlerException: Too Many Requests' });
       }
+      if (JSON.parse(body).email === 'broken@example.com') return json(res, 200, {});
       return json(res, 200, { accessToken: valid, refreshToken: 'rotated' });
     }
     if (req.url === '/auth/register')
@@ -216,6 +217,14 @@ test('login rejects a malformed body as a bad request, not a wrong password', as
   });
   assert.equal(res.status, 400);
   assert.equal(received, before);
+});
+test('login without a token pair from BFF is a service failure, not a session', async () => {
+  const res = await request(
+    '/api/auth/login',
+    post({ email: 'broken@example.com', password: 'password' }),
+  );
+  assert.equal(res.status, 502);
+  assert.equal(res.headers.getSetCookie().length, 0);
 });
 test('register preserves the BFF rejection status', async () => {
   const res = await request('/api/auth/register', post({}));

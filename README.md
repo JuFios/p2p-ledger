@@ -379,8 +379,8 @@ JSON-логи містять trace_id/span_id (null поза span), секрет
 
 Збережено окремі пакети, Node/Nest/Next major, DTO login/register, bcrypt паролів,
 основу Compose. Login/register мають ті самі поля, submit і роутинг;
-змінено оформлення й підписи, а login на 429 показує час очікування з `Retry-After`
-замість «невірний пароль». Спільного Prettier/tsconfig та підключеного брокера
+змінено оформлення й підписи, а login на 429 показує час очікування з `Retry-After`,
+на 5xx — недоступність сервісу, а не «невірний пароль». Спільного Prettier/tsconfig та підключеного брокера
 notifications у фактичному стартері не було, попри опис у ТЗ.
 
 | Що змінено | Навіщо |
@@ -507,7 +507,8 @@ Transfers і pay мають один спільний ліміт за userId (`T
 Middleware оновлює access через refresh; паралельні refresh об’єднуються в процесі,
 успішна пара кешується на 30 с для запізнілих запитів зі старою cookie.
 Тимчасовий збій refresh лишає cookie: API отримує JSON 503, сторінка — HTML 503 з повтором.
-Login передає `Retry-After` ліміту, а некоректне тіло запиту отримує 400.
+Login передає `Retry-After` ліміту, некоректне тіло запиту отримує 400, а відповідь BFF
+без пари токенів — 502 без cookie.
 Logout відкликає sid і очищає cookie; уже виданий access живе до свого exp.
 `/api/auth/ws-token` віддає access у пам’ять сторінки для handshake; refresh лишається
 в httpOnly-cookie. Cookie: SameSite=Lax, Secure при HTTPS. У localStorage токенів немає.

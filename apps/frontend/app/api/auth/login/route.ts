@@ -20,6 +20,9 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify(body),
       headers: forwardedFor ? { 'X-Forwarded-For': forwardedFor } : undefined,
     });
+    if (!tokens?.accessToken || !tokens.refreshToken) {
+      return NextResponse.json({ error: 'Некоректна відповідь сервісу.' }, { status: 502 });
+    }
     const res = NextResponse.json({ ok: true });
     res.cookies.set('accessToken', tokens.accessToken, tokenCookies(req.nextUrl.protocol === 'https:'));
     res.cookies.set('refreshToken', tokens.refreshToken, tokenCookies(req.nextUrl.protocol === 'https:'));

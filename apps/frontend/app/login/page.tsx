@@ -25,6 +25,9 @@ export default function LoginPage() {
           `Забагато спроб входу. Спробуйте ${wait ? `через ${wait} с` : 'пізніше'}.`,
         );
       }
+      if (res.status >= 500) {
+        throw new Error('Сервіс тимчасово недоступний. Спробуйте ще раз.');
+      }
       if (!res.ok) throw new Error('Невірний email або пароль');
       router.push('/wallets');
     } catch (err) {
