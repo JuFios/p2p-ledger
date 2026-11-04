@@ -60,3 +60,10 @@ test('login page shows the wait from Retry-After and a wrong password on 401', a
   const wrong = await loginWith(t, new Response('{}', { status: 401 }));
   assert.match(wrong.text, /Невірний email або пароль/);
 });
+
+test('login page does not blame the password for a rejected request origin', async (t) => {
+  const { text, pushed } = await loginWith(t, new Response('{}', { status: 403 }));
+  assert.match(text, /Не вдалося увійти/);
+  assert.doesNotMatch(text, /Невірний email або пароль/);
+  assert.deepEqual(pushed, []);
+});

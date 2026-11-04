@@ -123,8 +123,8 @@ export class SagaRunner implements OnModuleInit, BeforeApplicationShutdown {
     }
   }
 
-  // Один крок у span `saga.step <STEP>`, дочірньому до контексту запиту
-  // POST /transfers: уся сага з ретраями — один trace.
+  // Один крок у span `saga.step <STEP>`, дочірньому до контексту запиту, що
+  // створив переказ (POST /transfers або оплата частки): уся сага з ретраями — один trace.
   private step(transfer: Transfer): Promise<Transfer | null> {
     const parent = transfer.traceparent
       ? propagation.extract(ROOT_CONTEXT, { traceparent: transfer.traceparent })

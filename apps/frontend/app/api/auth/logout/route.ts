@@ -1,13 +1,9 @@
+import { crossOriginRejected, isSameOrigin } from '@/lib/same-origin';
 import { BFF_URL, FRONTEND_TIMEOUT_MS } from '@/lib/server-config';
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(req: NextRequest) {
-  let sameOrigin = false;
-  try {
-    const origin = new URL(req.headers.get('origin') ?? '');
-    sameOrigin = origin.host === req.headers.get('host') && origin.protocol === req.nextUrl.protocol;
-  } catch {}
-  if (!sameOrigin) return NextResponse.json({ message: 'Недозволене джерело запиту.' }, { status: 403 });
+  if (!isSameOrigin(req)) return crossOriginRejected();
   const refreshToken = req.cookies.get('refreshToken')?.value;
   if (refreshToken) {
     try {

@@ -28,7 +28,12 @@ export default function LoginPage() {
       if (res.status >= 500) {
         throw new Error('Сервіс тимчасово недоступний. Спробуйте ще раз.');
       }
-      if (!res.ok) throw new Error('Невірний email або пароль');
+      // Лише відмова за даними входу (400/401) означає невірний email чи пароль;
+      // інша відмова, наприклад 403 за чужим Origin, — не про пароль.
+      if (res.status === 400 || res.status === 401) {
+        throw new Error('Невірний email або пароль');
+      }
+      if (!res.ok) throw new Error('Не вдалося увійти. Спробуйте ще раз.');
       router.push('/wallets');
     } catch (err) {
       setError((err as Error).message);
