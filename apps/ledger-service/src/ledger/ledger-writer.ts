@@ -8,14 +8,9 @@ import { OutboxMessage } from './entities/outbox-message.entity';
 import { idempotencyKeyReused } from './ledger-errors';
 import { WalletBalance } from '../wallets/entities/wallet-balance.entity';
 import { hashRequest } from '../common/request-hash';
-import { currentTraceparent } from '../common/tracing';
 
 // Спільний шлях запису всіх команд ledger. Виконується в транзакції викликача
 // після блокування рядків wallet_balances зачеплених гаманців.
-
-// Хеш запиту й traceparent — спільні контракти (contracts/); реекспорт, щоб
-// команди ledger брали все для запису з одного модуля.
-export { hashRequest, currentTraceparent };
 
 export function toState(balance: WalletBalance): WalletBalanceState {
   return { available: BigInt(balance.available), held: BigInt(balance.held) };

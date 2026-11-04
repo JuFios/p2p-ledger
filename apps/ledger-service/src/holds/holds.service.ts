@@ -14,12 +14,12 @@ import { Hold, HoldStatus } from '../ledger/entities/hold.entity';
 import { Operation } from '../ledger/entities/operation.entity';
 import {
   commitChange,
-  currentTraceparent,
   findCompletedOperation,
   formatBalance,
-  hashRequest,
   lockBalances,
 } from '../ledger/ledger-writer';
+import { hashRequest } from '../common/request-hash';
+import { currentTraceparent } from '../common/tracing';
 import {
   ledgerConflict,
   ledgerNotFound,
