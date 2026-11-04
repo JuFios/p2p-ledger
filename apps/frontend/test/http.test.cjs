@@ -41,15 +41,23 @@ before(async () => {
         return json(res, 429, { message: 'ThrottlerException: Too Many Requests' });
       }
       if (JSON.parse(body).email === 'broken@example.com') return json(res, 200, {});
+      if (JSON.parse(body).email === 'wrong@example.com')
+        return json(res, 401, { message: 'Невірний email або пароль' });
+      if (JSON.parse(body).email === 'numeric@example.com')
+        return json(res, 200, { accessToken: 1, refreshToken: { value: 'rotated' } });
       return json(res, 200, { accessToken: valid, refreshToken: 'rotated' });
     }
-    if (req.url === '/auth/register')
+    if (req.url === '/auth/register') {
+      if (JSON.parse(body).email === 'broken@example.com') return json(res, 200, {});
       return json(res, 409, { message: 'Email already registered' });
+    }
     if (req.url === '/auth/refresh') {
       refreshCalls++;
       const token = JSON.parse(body).refreshToken;
       if (token === 'unavailable')
         return json(res, 503, { message: 'Unavailable' });
+      if (token === 'numeric')
+        return json(res, 200, { accessToken: 1, refreshToken: { value: 'rotated' } });
       if (token !== 'refresh' && token !== 'concurrent')
         return json(res, 401, { message: 'Invalid refresh' });
       if (token === 'concurrent')
@@ -226,9 +234,56 @@ test('login without a token pair from BFF is a service failure, not a session', 
   assert.equal(res.status, 502);
   assert.equal(res.headers.getSetCookie().length, 0);
 });
+test('login keeps the wrong-credentials status from BFF without a session', async () => {
+  const res = await request(
+    '/api/auth/login',
+    post({ email: 'wrong@example.com', password: 'password' }),
+  );
+  assert.equal(res.status, 401);
+  assert.equal(res.headers.getSetCookie().length, 0);
+});
+test('login treats non-string tokens from BFF as a service failure', async () => {
+  const res = await request(
+    '/api/auth/login',
+    post({ email: 'numeric@example.com', password: 'password' }),
+  );
+  assert.equal(res.status, 502);
+  assert.equal(res.headers.getSetCookie().length, 0);
+});
+test('login and register reject cross-origin posts before reaching the BFF', async () => {
+  for (const path of ['/api/auth/login', '/api/auth/register']) {
+    for (const origin of ['https://other.example', null]) {
+      const before = received;
+      const init = post({ email: 'user@example.com', password: 'password' });
+      if (origin) init.headers.Origin = origin;
+      else delete init.headers.Origin;
+      const res = await request(path, init);
+      assert.equal(res.status, 403, `${path} ${origin}`);
+      assert.equal(res.headers.getSetCookie().length, 0);
+      assert.equal(received, before);
+    }
+  }
+});
 test('register preserves the BFF rejection status', async () => {
   const res = await request('/api/auth/register', post({}));
   assert.equal(res.status, 409);
+});
+test('register without a token pair from BFF is a service failure, not a session', async () => {
+  const res = await request(
+    '/api/auth/register',
+    post({ email: 'broken@example.com', password: 'password' }),
+  );
+  assert.equal(res.status, 502);
+  assert.equal(res.headers.getSetCookie().length, 0);
+});
+test('register rejects a malformed body as a bad request', async () => {
+  const before = received;
+  const res = await request('/api/auth/register', {
+    ...post({}),
+    body: '{"email":',
+  });
+  assert.equal(res.status, 400);
+  assert.equal(received, before);
 });
 test('logout preserves the browser origin behind a proxy and clears both cookies', async () => {
   const origin = 'http://public.example:7443';
@@ -307,6 +362,13 @@ test('temporary refresh failure on a page shows an HTML retry page and keeps coo
   assert.equal(res.status, 503);
   assert.match(res.headers.get('content-type'), /text\/html/);
   assert.match(await res.text(), /Оновити сторінку/);
+  assert.equal(res.headers.getSetCookie().length, 0);
+});
+test('refresh with non-string tokens from BFF is a failure, not a new session', async () => {
+  const res = await request('/api/bff/wallets', {
+    headers: { Cookie: `accessToken=${expired}; refreshToken=numeric` },
+  });
+  assert.equal(res.status, 503);
   assert.equal(res.headers.getSetCookie().length, 0);
 });
 test('ws handshake endpoint returns runtime URL and access token without refresh token or caching', async () => {
