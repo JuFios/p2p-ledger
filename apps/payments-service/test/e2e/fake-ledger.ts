@@ -128,7 +128,8 @@ export class FakeLedger {
       };
     }
     if (method === 'POST' && path === '/internal/holds') {
-      return this.once(body.operationId, () => this.place(body));
+      // Як ledger: відмову place (409) запам'ятовано під operationId.
+      return this.once(body.operationId, () => this.place(body), true);
     }
     if (method === 'POST' && (match = /^\/internal\/holds\/(.+)\/release$/.exec(path))) {
       const holdId = match[1];
@@ -155,11 +156,20 @@ export class FakeLedger {
     };
   }
 
-  private once(operationId: string, run: () => unknown) {
+  private once(operationId: string, run: () => unknown, keepRejection = false) {
     if (!this.operations.has(operationId)) {
-      this.operations.set(operationId, run());
+      try {
+        this.operations.set(operationId, run());
+      } catch (error) {
+        if (keepRejection && error instanceof HttpError && error.status === 409) {
+          this.operations.set(operationId, error);
+        }
+        throw error;
+      }
     }
-    return this.operations.get(operationId);
+    const result = this.operations.get(operationId);
+    if (result instanceof HttpError) throw result;
+    return result;
   }
 
   private place(body: Record<string, string>) {

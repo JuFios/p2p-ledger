@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+} from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { EventStore } from '../ledger/event-store';
 import { formatMinor } from '../ledger/domain/money';
@@ -56,6 +60,13 @@ export interface HoldView {
   status: HoldStatus;
 }
 
+// Тіло відмови place, збережене під operationId.
+interface PlaceRejection {
+  code: string;
+  message: string;
+}
+type PlaceOutcome = HoldView | { rejected: PlaceRejection };
+
 // Слід зняття холду, якого ще не було (release раніше за запізнілий place).
 // Живе в `operations`: окремої таблиці й міграції не потрібно.
 const releasedBeforePlaced = (holdId: string) => `hold-released:${holdId}`;
@@ -95,41 +106,35 @@ export class HoldsService {
     return { holdId: hold.holdId, status: hold.status };
   }
 
+  // Відмову (409) запам'ятовуємо під operationId так само, як успіх: запит
+  // саги, що застряг і дійшов уже після відмови повтору, отримує ту саму
+  // відмову, а не ставить холд після FAILED переказу.
   async place(command: PlaceHoldCommand): Promise<HoldView> {
     const amountMinor = BigInt(command.amountMinor);
-    return this.dataSource
-      .transaction(async (manager) => {
+    const outcome = await this.dataSource
+      .transaction(async (manager): Promise<PlaceOutcome> => {
         const balances = await lockBalances(manager, [command.walletId]);
-        const done = await findCompletedOperation<HoldView>(
+        const done = await findCompletedOperation<PlaceOutcome>(
           manager,
           command.operationId,
           command,
         );
         if (done) return done;
-        if (
-          await manager.findOne(Operation, {
-            where: { operationId: releasedBeforePlaced(command.holdId) },
-          })
-        ) {
-          throw ledgerConflict('HOLD_NOT_ACTIVE', 'Холд уже знято');
-        }
-
-        const wallet = await this.findWallet(manager, command.walletId);
-        if (wallet.ownerId !== command.ownerId) {
-          throw ledgerConflict('OWNER_MISMATCH', 'Гаманець належить іншому');
-        }
-        if (wallet.currency !== command.currency) {
-          throw ledgerConflict('CURRENCY_MISMATCH', 'Інша валюта гаманця');
-        }
-        if (wallet.frozen) {
-          throw ledgerConflict('WALLET_FROZEN', 'Гаманець заморожено');
-        }
-        if (balances[wallet.id].available < amountMinor) {
-          throw ledgerConflict('INSUFFICIENT_FUNDS', 'Недостатньо коштів');
-        }
-        if (await manager.findOne(Hold, { where: { holdId: command.holdId } })) {
-          // Той самий холд з іншим operationId.
-          throw ledgerConflict('HOLD_NOT_ACTIVE', 'Холд уже існує');
+        let wallet: Wallet;
+        try {
+          wallet = await this.checkPlace(manager, command, balances);
+        } catch (error) {
+          // Відсутній гаманець (404) не запам'ятовуємо: з тим самим id його
+          // вже ніхто не створить.
+          if (!(error instanceof ConflictException)) throw error;
+          const rejected = error.getResponse() as PlaceRejection;
+          await manager.insert(Operation, {
+            operationId: command.operationId,
+            type: 'hold',
+            requestHash: hashRequest(command),
+            result: { rejected },
+          });
+          return { rejected };
         }
 
         const postings = holdPostings(wallet.id, wallet.currency, amountMinor);
@@ -196,6 +201,41 @@ export class HoldsService {
         return result;
       })
       .catch(rethrowOperationConflict);
+    if ('rejected' in outcome) throw new ConflictException(outcome.rejected);
+    return outcome;
+  }
+
+  // Перевірки place під блокуванням гаманця; відмова — ledgerConflict.
+  private async checkPlace(
+    manager: EntityManager,
+    command: PlaceHoldCommand,
+    balances: Balances,
+  ): Promise<Wallet> {
+    if (
+      await manager.findOne(Operation, {
+        where: { operationId: releasedBeforePlaced(command.holdId) },
+      })
+    ) {
+      throw ledgerConflict('HOLD_NOT_ACTIVE', 'Холд уже знято');
+    }
+    const wallet = await this.findWallet(manager, command.walletId);
+    if (wallet.ownerId !== command.ownerId) {
+      throw ledgerConflict('OWNER_MISMATCH', 'Гаманець належить іншому');
+    }
+    if (wallet.currency !== command.currency) {
+      throw ledgerConflict('CURRENCY_MISMATCH', 'Інша валюта гаманця');
+    }
+    if (wallet.frozen) {
+      throw ledgerConflict('WALLET_FROZEN', 'Гаманець заморожено');
+    }
+    if (balances[wallet.id].available < BigInt(command.amountMinor)) {
+      throw ledgerConflict('INSUFFICIENT_FUNDS', 'Недостатньо коштів');
+    }
+    if (await manager.findOne(Hold, { where: { holdId: command.holdId } })) {
+      // Той самий холд з іншим operationId.
+      throw ledgerConflict('HOLD_NOT_ACTIVE', 'Холд уже існує');
+    }
+    return wallet;
   }
 
   // Повернення коштів з held в available. З reason — це компенсація саги,
