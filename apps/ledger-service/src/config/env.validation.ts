@@ -90,6 +90,10 @@ export class EnvironmentVariables {
 
   @IsInt()
   @Min(1)
+  LOGIN_IP_RATE_LIMIT: number = 20;
+
+  @IsInt()
+  @Min(1)
   LOGIN_RATE_TTL_MS: number = 60000;
 
   @IsString()

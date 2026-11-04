@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
+import { clientIp } from './auth/guards/login-throttler.guard';
 import { WalletsModule } from './wallets/wallets.module';
 import { HealthModule } from './health/health.module';
 import { InternalModule } from './internal/internal.module';
@@ -28,13 +29,20 @@ import { readDatabaseEnvironment } from './config/runtime-env';
       migrationsRun: true,
     }),
     ScheduleModule.forRoot(),
-    // Застосовується лише там, де стоїть LoginThrottlerGuard (POST /auth/login).
+    // Застосовується лише там, де стоїть LoginThrottlerGuard (POST /auth/login):
+    // за email і окремо за IP клієнта, вікно спільне.
     ThrottlerModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => [
         {
           limit: Number(config.get('LOGIN_RATE_LIMIT', 5)),
           ttl: Number(config.get('LOGIN_RATE_TTL_MS', 60000)),
+        },
+        {
+          name: 'ip',
+          limit: Number(config.get('LOGIN_IP_RATE_LIMIT', 20)),
+          ttl: Number(config.get('LOGIN_RATE_TTL_MS', 60000)),
+          getTracker: clientIp,
         },
       ],
     }),

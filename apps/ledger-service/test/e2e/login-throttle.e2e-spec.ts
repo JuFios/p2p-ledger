@@ -29,4 +29,20 @@ describe('Login rate limit (e2e)', () => {
     await login(victim.email, 'password123').expect(429);
     await login(other.email, 'password123').expect(201);
   });
+
+  const loginFrom = (forwardedFor: string, email: string, password: string) =>
+    login(email, password).set('x-forwarded-for', forwardedFor);
+
+  it('обмежує перебір одного пароля по різних акаунтах з одного IP', async () => {
+    const limit = Number(process.env.LOGIN_IP_RATE_LIMIT);
+    const user = await registerUser(app);
+    for (let i = 0; i < limit; i++) {
+      await loginFrom('203.0.113.7', `spray-${i}-${user.email}`, 'password123').expect(401);
+    }
+    const blocked = await loginFrom('203.0.113.7', user.email, 'password123').expect(429);
+    expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0);
+    // Рахується останній запис x-forwarded-for — той, що додав найближчий proxy.
+    await loginFrom('198.51.100.1, 203.0.113.7', user.email, 'password123').expect(429);
+    await loginFrom('203.0.113.8', user.email, 'password123').expect(201);
+  });
 });

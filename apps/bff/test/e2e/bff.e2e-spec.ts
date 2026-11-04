@@ -194,6 +194,21 @@ it.each([
   expect(ledger.calls[0]).toMatchObject({ url: path, body });
 });
 
+it('forwards the client IP for the ledger login limit', async () => {
+  ledger.status = 201;
+  const body = { email: 'new@example.com', password: 'password' };
+  await request(app.getHttpServer())
+    .post('/auth/login')
+    .set('X-Forwarded-For', '203.0.113.7')
+    .send(body)
+    .expect(201);
+  await request(app.getHttpServer()).post('/auth/login').send(body).expect(201);
+  expect(ledger.calls.map((call) => call.headers['x-forwarded-for'])).toEqual([
+    '203.0.113.7',
+    expect.stringMatching(/127\.0\.0\.1$/),
+  ]);
+});
+
 it.each([200, 401, 404, 409, 422, 429, 503])(
   'preserves upstream status %i and error body',
   async (status) => {
@@ -427,6 +442,7 @@ it('queries the verified root operation and returns ordered saga attempts in mil
     limit: '7',
   });
   expect(jaeger.calls[0].headers.authorization).toBeUndefined();
+  expect(jaeger.calls[0].headers['x-forwarded-for']).toBeUndefined();
 });
 
 it('handles empty and unavailable Jaeger responses', async () => {

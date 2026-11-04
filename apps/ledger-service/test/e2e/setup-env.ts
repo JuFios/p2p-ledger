@@ -16,6 +16,7 @@ const defaults: Record<string, string> = {
   ADMIN_EMAIL: 'e2e-admin@example.com',
   ADMIN_PASSWORD: 'e2e-admin-password',
   LOGIN_RATE_LIMIT: '5',
+  LOGIN_IP_RATE_LIMIT: '20',
   LOGIN_RATE_TTL_MS: '60000',
 };
 
