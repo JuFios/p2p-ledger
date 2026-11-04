@@ -45,4 +45,32 @@ describe('Login rate limit (e2e)', () => {
     await loginFrom('198.51.100.1, 203.0.113.7', user.email, 'password123').expect(429);
     await loginFrom('203.0.113.8', user.email, 'password123').expect(201);
   });
+
+  it('успішні входи з одного IP не витрачають ліміт невдалих спроб', async () => {
+    const limit = Number(process.env.LOGIN_IP_RATE_LIMIT);
+    const users = await Promise.all(
+      Array.from({ length: limit + 5 }, () => registerUser(app)),
+    );
+    for (const user of users) {
+      await loginFrom('203.0.113.20', user.email, 'password123').expect(201);
+    }
+    for (let i = 0; i < limit; i++) {
+      await loginFrom('203.0.113.20', `nat-${i}-${users[0].email}`, 'x').expect(401);
+    }
+    await loginFrom('203.0.113.20', users[1].email, 'password123').expect(429);
+  });
+
+  it('паралельні невдалі спроби з одного IP не перевищують ліміт', async () => {
+    const limit = Number(process.env.LOGIN_IP_RATE_LIMIT);
+    const user = await registerUser(app);
+    const statuses = await Promise.all(
+      Array.from({ length: limit * 2 }, (_, i) =>
+        loginFrom('203.0.113.30', `burst-${i}-${user.email}`, 'password123').then(
+          (res) => res.status,
+        ),
+      ),
+    );
+    expect(statuses.filter((status) => status === 401)).toHaveLength(limit);
+    expect(statuses.filter((status) => status === 429)).toHaveLength(limit);
+  });
 });

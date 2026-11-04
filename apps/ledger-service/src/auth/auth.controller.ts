@@ -1,9 +1,17 @@
-import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  Post,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { LoginThrottlerGuard } from './guards/login-throttler.guard';
+import { LoginIpLimitInterceptor } from './interceptors/login-ip-limit.interceptor';
 
 @Controller('auth')
 export class AuthController {
@@ -16,6 +24,7 @@ export class AuthController {
 
   @Post('login')
   @UseGuards(LoginThrottlerGuard)
+  @UseInterceptors(LoginIpLimitInterceptor)
   login(@Body() dto: LoginDto) {
     return this.auth.login(dto);
   }
