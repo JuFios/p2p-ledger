@@ -229,7 +229,7 @@ week/ordinal/basic та неіснуючі дні відхиляються до 
 | RISK_CHECK | `TRANSFER_MAX_AMOUNT`, `BLOCKED_EMAILS` | FAILED без зміни грошей | Неочікувана помилка повторюється до ліміту, потім FAILED. |
 | RESOLVE_RECIPIENT | Пошук за email, заборона self-transfer за userId, ensure гаманця | FAILED; порожній створений гаманець лишається | Backoff до ліміту, потім FAILED. |
 | FX_QUOTE | Зберегти курс, його час і суму зарахування | FAILED, холду ще немає | Повтор до ліміту, потім FAILED. |
-| HOLD | available → held, `transfer:<id>:hold` | FAILED, ledger відхилив команду; якщо перед відмовою була спроба без відповіді — RELEASE_HOLD → FAILED | Повтор тим самим operationId; після ліміту RELEASE_HOLD, бо холд міг з’явитися. |
+| HOLD | available → held, `transfer:<id>:hold` | FAILED, ledger відхилив команду й запам’ятав відмову під operationId | Повтор тим самим operationId; після ліміту RELEASE_HOLD, бо холд міг з’явитися. |
 | CONFIRM | Курс не застарів, отримувач не frozen | COMPENSATING → RELEASE_HOLD → FAILED | Повтор до ліміту, потім RELEASE_HOLD. |
 | CAPTURE | Атомарно held відправника → available отримувача, `transfer:<id>:capture` | RELEASE_HOLD → FAILED | Повтор capture; після ліміту перевірити холд: CAPTURED → COMPLETED, інший стан → компенсація. Недоступний ledger → далі чекати з backoff. |
 | RELEASE_HOLD | held → available, `transfer:<id>:release` | NOT_FOUND → FAILED; HOLD_NOT_ACTIVE / IDEMPOTENCY_KEY_REUSED → перевірити холд: CAPTURED → COMPLETED, RELEASED/немає → FAILED, ACTIVE → повтор | Без ліміту повторів, доки результат не визначено; COMPENSATING зберігається. |
@@ -238,9 +238,10 @@ week/ordinal/basic та неіснуючі дні відхиляються до 
 Таймаут/5xx/breaker open означає невідомий результат, а не відмову.
 Невідомий capture не компенсується наосліп. Release передає `walletId`:
 для ще не створеного холду ledger під блокуванням гаманця лишає слід в `operations`,
-тож запізнілий place отримує `HOLD_NOT_ACTIVE`. Відмову ledger не запам'ятовує під
-operationId, тому відмова HOLD після спроби без відповіді теж іде через release:
-інакше перша спроба, що дійшла пізніше, поставила б холд уже після FAILED. Capture/release серіалізуються;
+тож запізнілий place отримує `HOLD_NOT_ACTIVE`. Відмову place (409) ledger зберігає
+в `operations` під operationId так само, як успіх: спроба, що застрягла й дійшла вже
+після відмови повтору, отримує ту саму відмову, тож холд після FAILED не з’являється
+за будь-якої причини повтору (таймаут, падіння runner'а, втрачений lease). Capture/release серіалізуються;
 фінал визначається за станом холду. Після компенсації FAILED зберігає `RELEASE_HOLD`;
 `DONE` буває лише при COMPLETED.
 
@@ -541,11 +542,10 @@ Connect/reconnect перечитує REST-стан; після JWT exp соке�
   Для кількох інстансів потрібні спільні WS-кімнати та узгодження порядку emit,
   refresh і rate limit. Runner чекає найповільнішу сагу пачки; пул зі звільненням
   слотів покращив би використання ресурсів.
-- Ідемпотентність запам'ятовує лише виконані команди: відмову (недостатньо коштів,
-  frozen тощо) ledger під тим самим `Idempotency-Key`/operationId не фіксує, і повтор
-  виконується наново. UI після остаточної відмови генерує новий ключ; сага після
-  спроби HOLD без відповіді знімає холд release-ом, тож запізнілий place не лишає
-  коштів у held. Строгіший варіант — зберігати відмову в `operations` поруч з успіхом.
+- Відмову під ключем ідемпотентності ledger запам'ятовує лише для холду саги.
+  Deposit/withdraw з тим самим `Idempotency-Key` після відмови (недостатньо коштів,
+  frozen тощо) виконуються наново; UI після остаточної відмови генерує новий ключ.
+  Строгіший варіант — так само зберігати їхню відмову в `operations`.
 - `CONSUMER_NAME` за замовчуванням — hostname і pid: після перестворення контейнера
   старий консюмер лишається в групі `notifications`, його pending забирає XAUTOCLAIM
   через `CONSUMER_CLAIM_IDLE_MS`. Для тривалої роботи — стабільне ім'я або

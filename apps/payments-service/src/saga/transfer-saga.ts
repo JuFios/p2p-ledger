@@ -51,8 +51,8 @@ export function backoffMs(attempts: number, baseMs: number): number {
 }
 
 // Таблиця переходів саги (див. README «Сага переказу»):
-// - відмова до холду → FAILED, компенсувати нічого (крім відмови HOLD після
-//   спроби без відповіді — тоді release, бо запізнілий холд ще можливий);
+// - відмова до холду → FAILED, компенсувати нічого (відмову HOLD ledger
+//   запам'ятовує під operationId, тож запізніла спроба холд не поставить);
 // - відмова після холду (CONFIRM, CAPTURE) → COMPENSATING → RELEASE_HOLD;
 // - невизначений результат → ретрай з backoff; вичерпані спроби — як відмова,
 //   крім CAPTURE (його результат з'ясовується в самому кроці через стан
@@ -87,10 +87,6 @@ export function decide(
     transfer.step === 'CONFIRM' || transfer.step === 'CAPTURE';
 
   const holdMayHaveBeenPlaced = transfer.step === 'HOLD' || holdAlreadyPlaced;
-  // Попередня спроба HOLD лишилась без відповіді й може ще виконатись у
-  // ledger. Відмову ledger не запам'ятовує, тож без release запізнілий place
-  // створив би холд уже після FAILED; release за гаманцем лишає слід зняття.
-  const holdMayStillLand = transfer.step === 'HOLD' && transfer.attempts > 0;
   const mustResolveOutcome =
     transfer.step === 'CAPTURE' || transfer.step === 'RELEASE_HOLD';
 
@@ -119,9 +115,7 @@ export function decide(
     case 'compensated':
       return { ...base, status: 'FAILED', step: transfer.step, continue: false };
     case 'rejected':
-      return holdAlreadyPlaced || holdMayStillLand
-        ? compensate(result.reason)
-        : fail(result.reason);
+      return holdAlreadyPlaced ? compensate(result.reason) : fail(result.reason);
     case 'uncertain': {
       const attempts = transfer.attempts + 1;
       if (!mustResolveOutcome && attempts >= settings.maxAttempts) {

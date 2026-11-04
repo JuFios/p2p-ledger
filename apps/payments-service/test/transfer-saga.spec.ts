@@ -401,26 +401,23 @@ describe('TransferSaga', () => {
       );
     });
 
-    it('HOLD: відмова після спроби без відповіді → release (запізнілий холд) → FAILED', async () => {
+    it('HOLD: відмова після спроби без відповіді → FAILED без release', async () => {
       const ledger = ledgerMock();
-      // Перша спроба могла ще виконатись у ledger, друга отримала відмову.
+      // Відмову ledger запам'ятовує під тим самим operationId, тож перша
+      // спроба, що дійде пізніше, отримає її ж — компенсувати нічого.
       ledger.placeHold
         .mockRejectedValueOnce(unavailable())
         .mockRejectedValueOnce(rejection('INSUFFICIENT_FUNDS'));
       const result = await runSaga(createSaga(ledger), newTransfer());
       expect(result).toMatchObject({
         status: 'FAILED',
-        step: 'RELEASE_HOLD',
+        step: 'HOLD',
         failureReason: 'INSUFFICIENT_FUNDS',
       });
       expect(ledger.placeHold).toHaveBeenCalledTimes(2);
+      expect(ledger.placeHold.mock.calls[1]).toEqual(ledger.placeHold.mock.calls[0]);
       expect(ledger.captureHold).not.toHaveBeenCalled();
-      expect(ledger.releaseHold).toHaveBeenCalledWith(
-        result.id,
-        `transfer:${result.id}:release`,
-        'INSUFFICIENT_FUNDS',
-        result.fromWalletId,
-      );
+      expect(ledger.releaseHold).not.toHaveBeenCalled();
     });
 
     it('RESOLVE_RECIPIENT: спроби вичерпано → FAILED без release', async () => {
