@@ -252,7 +252,8 @@ test('login treats non-string tokens from BFF as a service failure', async () =>
 });
 test('login and register reject cross-origin posts before reaching the BFF', async () => {
   for (const path of ['/api/auth/login', '/api/auth/register']) {
-    for (const origin of ['https://other.example', null]) {
+    // Той самий host з іншою схемою — теж інший сайт.
+    for (const origin of ['https://other.example', base.replace('http:', 'https:'), null]) {
       const before = received;
       const init = post({ email: 'user@example.com', password: 'password' });
       if (origin) init.headers.Origin = origin;
