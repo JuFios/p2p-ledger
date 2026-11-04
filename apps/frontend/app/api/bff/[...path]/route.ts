@@ -1,3 +1,4 @@
+import { crossOriginRejected, isSameOrigin } from '@/lib/same-origin';
 import { BFF_URL, FRONTEND_TIMEOUT_MS } from '@/lib/server-config';
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
@@ -6,20 +7,7 @@ async function proxy(
   req: NextRequest,
   { params }: { params: { path: string[] } },
 ) {
-  const origin = req.headers.get('origin');
-  let sameOrigin = false;
-  try {
-    const source = new URL(origin ?? '');
-    sameOrigin =
-      source.host === req.headers.get('host') &&
-      source.protocol === req.nextUrl.protocol;
-  } catch {}
-  if (req.method !== 'GET' && !sameOrigin) {
-    return NextResponse.json(
-      { message: 'Недозволене джерело запиту.' },
-      { status: 403 },
-    );
-  }
+  if (req.method !== 'GET' && !isSameOrigin(req)) return crossOriginRejected();
   const allowed = [
     'wallets',
     'transfers',
