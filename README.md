@@ -6,6 +6,35 @@
 Поповнення та виведення — локальні моки без зовнішніх банківських інтеграцій.
 Стек: Node 20, NestJS 10, Next.js 14 (App Router), TypeORM 0.3, PostgreSQL 16, Redis 7.
 
+## Коротко
+
+**Що зроблено**
+
+- Ledger: append-only event store у PostgreSQL, проєкції балансів, подвійний запис,
+  ідемпотентні команди, холди та звірка `Σ дебетів = Σ кредитів`.
+- Payments: оркестрована сага переказу (холд → підтвердження → зарахування або
+  компенсація), FX-курс із кешем, split-рахунки з оплатою часток і нагадуваннями.
+- Notifications: споживач Redis Streams, стрічка активності, Socket.IO push.
+- BFF і Next.js: єдиний REST API, сесія в httpOnly-cookie, live-статус переказу,
+  адмінка з event-логом, звіркою та traces з Jaeger.
+- Тести кожного пакета, system-тести через увесь стек і race-тест подвійного списання в CI.
+
+**Запуск:** `docker compose up --build`, далі [localhost:3000](http://localhost:3000).
+Адмін — `admin@example.com` / `change-me-admin`; [демо за шість дій](#демо-за-шість-дій),
+[system і race тести](#тести-та-результати-race-тесту).
+
+| Де | Що |
+|---|---|
+| `apps/ledger-service` | Auth, гаманці, event store, holds, звірка |
+| `apps/payments-service` | Сага переказів, FX, split-рахунки |
+| `apps/notifications-service` | Activity, Socket.IO `/ws` |
+| `apps/bff`, `apps/frontend` | Публічний API та UI |
+| `tests/system` | System-тести й race-скрипт `load/double-spend.ts` |
+| `contracts`, `.github/workflows` | Спільні правила (валюти, суми, env, outbox relay) і CI |
+
+Свідомі компроміси й межі — в [обмеженнях](#обмеження-та-подальші-зміни).
+Нижче — деталі.
+
 ## Зміст
 
 - [Запуск і демо](#запуск-і-демо)
@@ -187,7 +216,8 @@ week/ordinal/basic та неіснуючі дні відхиляються до 
 
 `POST /transfers` із JWT та `Idempotency-Key` (1–128 символів) → `202/PENDING`;
 той самий ключ і тіло → `200`, інше тіло → `422 IDEMPOTENCY_KEY_REUSED`.
-Одержувач — email (`toWalletIdentifier`), `toCurrency` необов’язкова.
+Одержувач — email (`toWalletIdentifier`, чому без username — у
+[обмеженнях](#обмеження-та-подальші-зміни)), `toCurrency` необов’язкова.
 Відправник бачить свій переказ завжди, отримувач — лише `COMPLETED`, іншим — 404.
 
 | Крок | Дія | Остаточна відмова | Невизначений результат / вичерпання спроб |
@@ -374,9 +404,11 @@ available/held/frozen. Витрати обмежені available, frozen бло�
 | Frontend persistence/client/parsers | Фікстури отримали userId, step, currency/toCurrency та явний парсер. Нові рядкові стани дозволені, malformed/missing/валюти лишаються строгими; ключі, polling і захист від старих відповідей збережені. |
 | Frontend format/BillDetails | UTC SSR → пояс браузера замість фіксованого поясу; перевірки hydration, DST і включного календаря. |
 | Payments split-validation | Два direct-call null тести проходять реальний ValidationPipe → сервіс: null відхиляється до hash/БД, з ключем і без. HTTP e2e збережено. |
+| BFF Jaeger, frontend login HTTP | Додано перевірки `X-Forwarded-For`: IP клієнта не йде в Jaeger, login передає його в BFF. Попередні перевірки без змін. |
 
 Регресійні тести охоплюють переставлені відповіді polling/live/manual і збереження помилки гаманців до успішного повного оновлення,
-DST опівночі, logout за проксі та конкурентну реєстрацію на PostgreSQL.
+DST опівночі, logout за проксі, конкурентну реєстрацію на PostgreSQL, ліміт логіну за IP
+та заморозку отримувача між HOLD і CONFIRM (ledger на PostgreSQL зі звіркою) і між CONFIRM і CAPTURE (сага).
 Для logout очікується відносний Location, для реєстрації — один акаунт, решта відповідей 409 та чинні login/refresh переможця.
 
 Технічні правила й шаблон relay мають одне джерело в `contracts/` та похідні
@@ -451,7 +483,10 @@ Split-create та accept — Server Actions; грошові мутації — f
 що додає Bearer із httpOnly-cookie, передає ключ/JSON/status/Retry-After та
 перевіряє Origin/Host для POST. BFF знову перевіряє JWT/DTO, сервіс-власник — права
 й бізнес-правила. Internal API доступне лише з x-internal-token й не проксується.
-Login лімітується за email, transfers/pay — за userId; BFF не об’єднує всіх під одним IP.
+Login лімітується за email (`LOGIN_RATE_LIMIT`) і окремо за IP клієнта
+(`LOGIN_IP_RATE_LIMIT`) у спільному вікні `LOGIN_RATE_TTL_MS`: другий ліміт
+зупиняє перебір одного пароля по багатьох акаунтах. Frontend передає IP через BFF
+у `X-Forwarded-For`, ledger бере останній запис. Transfers/pay лімітуються за userId.
 `/dashboard` паралельно повертає секції data/error, відмова одного джерела не ховає решту.
 
 Middleware оновлює access через refresh; паралельні refresh об’єднуються в процесі,
@@ -495,6 +530,24 @@ Connect/reconnect перечитує REST-стан; після JWT exp соке�
 - Один refresh-вхід на користувача: новий login відкликає попередній refresh.
   При недоступному BFF logout очищає локальні cookie, але серверне відкликання
   не гарантоване. Безключовий API-виклик не має гарантії від дубля після втрати відповіді.
+- Одержувач переказу — лише email. У стартовому auth-модулі немає username;
+  його додавання означає нову колонку з унікальністю, міграцію, зміну реєстрації
+  та стартових сторінок login/register, а ТЗ просить не переписувати auth без потреби.
+  Поле `toWalletIdentifier` дозволяє додати інший ідентифікатор без перейменування в API.
+- Access JWT не містить sid, тому REST-сервіси та WS-handshake перевіряють лише
+  підпис і exp. Після logout уже виданий access, зокрема відкритий сокет, живе до exp
+  (`JWT_ACCESS_TTL`, типово 15 хв): notifications закриває сокет таймером на exp.
+  Миттєве відкликання потребує sid в access і події відкликання сесії або перевірки
+  в ledger на кожен запит.
+- Access JWT підписуються HS256 спільним `JWT_ACCESS_SECRET`: видає лише ledger,
+  решта перевіряє, але технічно будь-який сервіс із секретом може підписати токен.
+  Компроміс прийнято, бо всі сервіси в одній зоні довіри Compose і вже ділять
+  `INTERNAL_API_TOKEN`. Для окремих зон довіри — RS256/ES256: приватний ключ лише
+  в ledger, публічний або JWKS у решти; refresh лишається внутрішнім для ledger.
+- `next start` не перезаписує `X-Forwarded-For` від клієнта. Без reverse proxy,
+  що сам виставляє цей заголовок, IP можна підробити: обійти ліміт за IP або
+  вичерпати ліміт чужої адреси. Ліміт за email від цього не залежить. Ліміт за IP
+  рахує й успішні входи, тож для великого NAT `LOGIN_IP_RATE_LIMIT` треба підняти.
 - Для публічного розгортання потрібні власні секрети, TLS, закриті БД/Redis/metrics/docs,
   політика upgrade/egress для Next, резервні копії та міграція реальних даних.
   Поточний Compose — локальна демонстрація; готовність до production не заявляється.
