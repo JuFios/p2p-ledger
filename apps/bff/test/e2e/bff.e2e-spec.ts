@@ -43,10 +43,7 @@ async function fake(): Promise<Fake> {
         'Content-Type': 'application/json',
         ...state.headers,
       });
-      // data може залежати від запиту (різні відповіді на різні query).
-      const data =
-        typeof state.data === 'function' ? state.data(req.url) : state.data;
-      res.end(JSON.stringify(data));
+      res.end(JSON.stringify(state.data));
     },
   );
   await new Promise<void>((done) => state.server.listen(0, '127.0.0.1', done));
@@ -382,7 +379,7 @@ it('protects freeze and proxies allowed admin operations', async () => {
   ]);
 });
 
-it('queries both saga root operations and returns ordered saga attempts in milliseconds', async () => {
+it('queries the saga start step and returns ordered saga attempts in milliseconds', async () => {
   const span = (
     spanID: string,
     operationName: string,
@@ -438,52 +435,52 @@ it('queries both saga root operations and returns ordered saga attempts in milli
         ],
       },
     ]);
-  const queries = jaeger.calls.map((call) =>
-    Object.fromEntries(new URL(call.url!, jaeger.url).searchParams),
-  );
-  expect(queries).toHaveLength(2);
-  expect(queries).toEqual(
-    expect.arrayContaining(
-      ['POST /transfers', 'POST /split-bills/:id/shares/:shareId/pay'].map(
-        (operation) => ({ service: 'payments-service', operation, limit: '7' }),
-      ),
-    ),
-  );
-  for (const call of jaeger.calls) {
-    expect(call.headers.authorization).toBeUndefined();
-    expect(call.headers['x-forwarded-for']).toBeUndefined();
-  }
+  expect(jaeger.calls).toHaveLength(1);
+  const url = new URL(jaeger.calls[0].url!, jaeger.url);
+  expect(Object.fromEntries(url.searchParams)).toEqual({
+    service: 'payments-service',
+    operation: 'saga.step RISK_CHECK',
+    limit: '7',
+  });
+  expect(jaeger.calls[0].headers.authorization).toBeUndefined();
+  expect(jaeger.calls[0].headers['x-forwarded-for']).toBeUndefined();
 });
 
-it('includes share payment sagas and keeps the newest traces within the limit', async () => {
-  const trace = (traceID: string, startTime: number) => ({
+it('returns the newest saga traces first, whatever request started them', async () => {
+  const trace = (traceID: string, root: string, startTime: number) => ({
     traceID,
     processes: { p1: { serviceName: 'payments-service' } },
     spans: [
       {
-        spanID: `${traceID}-step`,
-        operationName: 'saga.step HOLD',
+        spanID: `${traceID}-root`,
+        operationName: root,
         startTime,
+        duration: 1,
+        processID: 'p1',
+      },
+      {
+        spanID: `${traceID}-step`,
+        operationName: 'saga.step RISK_CHECK',
+        startTime: startTime + 10,
         duration: 1000,
         processID: 'p1',
-        tags: [],
       },
     ],
   });
-  jaeger.data = (url: string) => ({
-    data: url.includes('split-bills')
-      ? [trace('pay', 5000)]
-      : [trace('transfer', 1000), trace('pay', 5000)],
-  });
-  const ids = async (limit: number) =>
-    (
-      await request(app.getHttpServer())
-        .get(`/admin/traces?limit=${limit}`)
-        .set('Authorization', `Bearer ${admin}`)
-        .expect(200)
-    ).body.map((item: { traceId: string }) => item.traceId);
-  expect(await ids(2)).toEqual(['pay', 'transfer']);
-  expect(await ids(1)).toEqual(['pay']);
+  jaeger.data = {
+    data: [
+      trace('transfer', 'POST /transfers', 1000),
+      trace('pay', 'POST /split-bills/:id/shares/:shareId/pay', 5000),
+    ],
+  };
+  const res = await request(app.getHttpServer())
+    .get('/admin/traces')
+    .set('Authorization', `Bearer ${admin}`)
+    .expect(200);
+  expect(res.body.map((item: { traceId: string }) => item.traceId)).toEqual([
+    'pay',
+    'transfer',
+  ]);
 });
 
 it('handles empty and unavailable Jaeger responses', async () => {

@@ -327,8 +327,10 @@ OTel завантажується до HTTP/ORM/Redis/Pino. Контекст п�
 `transfers.traceparent`, outbox, `publish <type>` та `process <type>`;
 кожна спроба `saga.step <STEP>` лишається в trace запиту з `transfer.id`.
 У Jaeger шукайте payments-service / `POST /transfers` або
-`POST /split-bills/:id/shares/:shareId/pay` (оплата частки); адмінка через
-BFF `GET /admin/traces` бере найновіші trace обох операцій і показує тривалість кожної спроби зі span, у мілісекундах.
+`POST /split-bills/:id/shares/:shareId/pay` (оплата частки). Адмінка через
+BFF `GET /admin/traces` шукає trace за першим кроком саги `saga.step RISK_CHECK`:
+так видно сагу з будь-якого запиту, а запити, що сагу не запустили (відмова валідації, повтор за ключем),
+місця в списку не займають. Найновіші trace першими, тривалість кожної спроби — зі span, у мілісекундах.
 JSON-логи містять trace_id/span_id (null поза span), секретні заголовки маскуються.
 `/metrics`: Node/process, у payments також `transfers_total{status}` та
 `saga_step_duration_seconds{step}`. Метрики процесу не замінюють фінансовий журнал.
@@ -413,7 +415,7 @@ available/held/frozen. Витрати обмежені available, frozen бло�
 | Frontend persistence/client/parsers | Фікстури отримали userId, step, currency/toCurrency та явний парсер. Нові рядкові стани дозволені, malformed/missing/валюти лишаються строгими; ключі, polling і захист від старих відповідей збережені. |
 | Frontend format/BillDetails | UTC SSR → пояс браузера замість фіксованого поясу; перевірки hydration, DST і включного календаря. |
 | Payments split-validation | Два direct-call null тести проходять реальний ValidationPipe → сервіс: null відхиляється до hash/БД, з ключем і без. HTTP e2e збережено. |
-| BFF Jaeger, frontend login HTTP | Додано перевірки `X-Forwarded-For`: IP клієнта не йде в Jaeger, login передає його в BFF. Запит traces тепер очікує дві кореневі операції саги (переказ і оплата частки) замість однієї; порядок і тривалість спроб перевіряються як раніше. |
+| BFF Jaeger, frontend login HTTP | Додано перевірки `X-Forwarded-For`: IP клієнта не йде в Jaeger, login передає його в BFF. Traces шукаються за першим кроком саги `saga.step RISK_CHECK` замість кореневого `POST /transfers`, щоб охопити й оплату частки; порядок і тривалість спроб перевіряються як раніше. |
 
 Регресійні тести охоплюють переставлені відповіді polling/live/manual і збереження помилки гаманців до успішного повного оновлення,
 DST опівночі, logout за проксі, конкурентну реєстрацію на PostgreSQL, ліміт невдалих логінів за IP (успішні входи й паралельні спроби)
