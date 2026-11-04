@@ -35,8 +35,13 @@ before(async () => {
     let body = '';
     for await (const part of req) body += part;
     received = { url: req.url, headers: req.headers, body };
-    if (req.url === '/auth/login')
+    if (req.url === '/auth/login') {
+      if (JSON.parse(body).email === 'limited@example.com') {
+        res.setHeader('Retry-After', '42');
+        return json(res, 429, { message: 'ThrottlerException: Too Many Requests' });
+      }
       return json(res, 200, { accessToken: valid, refreshToken: 'rotated' });
+    }
     if (req.url === '/auth/register')
       return json(res, 409, { message: 'Email already registered' });
     if (req.url === '/auth/refresh') {
@@ -194,6 +199,24 @@ test('login passes the client IP from the fronting proxy to BFF', async () => {
   assert.equal(res.status, 200);
   assert.equal(received.headers['x-forwarded-for'], '198.51.100.1, 203.0.113.7');
 });
+test('login keeps the rate limit status and Retry-After from BFF', async () => {
+  const res = await request(
+    '/api/auth/login',
+    post({ email: 'limited@example.com', password: 'password' }),
+  );
+  assert.equal(res.status, 429);
+  assert.equal(res.headers.get('retry-after'), '42');
+  assert.equal(res.headers.getSetCookie().length, 0);
+});
+test('login rejects a malformed body as a bad request, not a wrong password', async () => {
+  const before = received;
+  const res = await request('/api/auth/login', {
+    ...post({}),
+    body: '{"email":',
+  });
+  assert.equal(res.status, 400);
+  assert.equal(received, before);
+});
 test('register preserves the BFF rejection status', async () => {
   const res = await request('/api/auth/register', post({}));
   assert.equal(res.status, 409);
@@ -266,6 +289,15 @@ test('temporary refresh failure keeps cookies so the user can retry', async () =
     headers: { Cookie: `accessToken=${expired}; refreshToken=unavailable` },
   });
   assert.equal(res.status, 503);
+  assert.equal(res.headers.getSetCookie().length, 0);
+});
+test('temporary refresh failure on a page shows an HTML retry page and keeps cookies', async () => {
+  const res = await request('/wallets', {
+    headers: { Cookie: `accessToken=${expired}; refreshToken=unavailable` },
+  });
+  assert.equal(res.status, 503);
+  assert.match(res.headers.get('content-type'), /text\/html/);
+  assert.match(await res.text(), /Оновити сторінку/);
   assert.equal(res.headers.getSetCookie().length, 0);
 });
 test('ws handshake endpoint returns runtime URL and access token without refresh token or caching', async () => {

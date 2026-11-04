@@ -5,8 +5,13 @@ import { tokenCookies } from '@/lib/session';
 // Проксі до BFF, щоб зберігати токени в httpOnly cookie,
 // а не в localStorage на клієнті.
 export async function POST(req: NextRequest) {
+  let body: unknown;
   try {
-    const body = await req.json();
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Некоректне тіло запиту.' }, { status: 400 });
+  }
+  try {
     // IP клієнта для ліміту логіну в ledger; next start заповнює x-forwarded-for
     // адресою з'єднання, якщо його не задав proxy попереду.
     const forwardedFor = req.headers.get('x-forwarded-for');
@@ -20,6 +25,9 @@ export async function POST(req: NextRequest) {
     res.cookies.set('refreshToken', tokens.refreshToken, tokenCookies(req.nextUrl.protocol === 'https:'));
     return res;
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: err instanceof ApiError ? err.status : 401 });
+    const res = NextResponse.json({ error: (err as Error).message }, { status: err instanceof ApiError ? err.status : 401 });
+    // Клієнт має знати, скільки чекати після ліміту спроб.
+    if (err instanceof ApiError && err.retryAfter) res.headers.set('Retry-After', err.retryAfter);
+    return res;
   }
 }

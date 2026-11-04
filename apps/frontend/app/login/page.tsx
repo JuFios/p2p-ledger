@@ -19,6 +19,12 @@ export default function LoginPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
+      if (res.status === 429) {
+        const wait = res.headers.get('Retry-After');
+        throw new Error(
+          `Забагато спроб входу. Спробуйте ${wait ? `через ${wait} с` : 'пізніше'}.`,
+        );
+      }
       if (!res.ok) throw new Error('Невірний email або пароль');
       router.push('/wallets');
     } catch (err) {
