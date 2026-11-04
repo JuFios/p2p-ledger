@@ -28,7 +28,8 @@ export async function POST(req: NextRequest) {
     res.cookies.set('refreshToken', tokens.refreshToken, tokenCookies(req.nextUrl.protocol === 'https:'));
     return res;
   } catch (err) {
-    const res = NextResponse.json({ error: (err as Error).message }, { status: err instanceof ApiError ? err.status : 401 });
+    // Невірні облікові дані BFF повертає як ApiError 401; інший збій — помилка сервісу.
+    const res = NextResponse.json({ error: (err as Error).message }, { status: err instanceof ApiError ? err.status : 500 });
     // Клієнт має знати, скільки чекати після ліміту спроб.
     if (err instanceof ApiError && err.retryAfter) res.headers.set('Retry-After', err.retryAfter);
     return res;
