@@ -1,15 +1,11 @@
 import { REFRESH_GRACE_MS, ACCESS_REFRESH_MARGIN_MS } from './lib/timing';
 import { BFF_URL, FRONTEND_TIMEOUT_MS } from './lib/server-config';
 import { NextRequest, NextResponse } from 'next/server';
-import { sessionClaims, tokenCookies } from './lib/session';
+import { isTokenPair, sessionClaims, TokenPair, tokenCookies } from './lib/session';
 
-interface Tokens {
-  accessToken: string;
-  refreshToken: string;
-}
 const refreshing = new Map<
   string,
-  Promise<{ status: number; tokens?: Tokens }>
+  Promise<{ status: number; tokens?: TokenPair }>
 >();
 
 function refresh(refreshToken: string) {
@@ -27,10 +23,9 @@ function refresh(refreshToken: string) {
         redirect: 'manual',
       },
     );
-    return {
-      status: upstream.status,
-      tokens: upstream.ok ? ((await upstream.json()) as Tokens) : undefined,
-    };
+    const body: unknown = upstream.ok ? await upstream.json() : undefined;
+    // Некоректна пара — не сесія і не потрапляє в кеш ротації нижче.
+    return { status: upstream.status, tokens: isTokenPair(body) ? body : undefined };
   })();
   refreshing.set(refreshToken, request);
   // Запізнілі запити зі старою cookie отримують ту саму ротацію.
@@ -69,12 +64,7 @@ export async function middleware(req: NextRequest) {
   try {
     const { status, tokens } = await refresh(refreshToken);
     if (status === 401 || status === 403) return reject();
-    if (
-      status < 200 ||
-      status >= 300 ||
-      !tokens?.accessToken ||
-      !tokens.refreshToken
-    )
+    if (status < 200 || status >= 300 || !tokens)
       throw new Error('invalid tokens');
     req.cookies.set('accessToken', tokens.accessToken);
     req.cookies.set('refreshToken', tokens.refreshToken);

@@ -20,6 +20,22 @@ export function sessionClaims(token?: string): SessionClaims | null {
   }
 }
 
+export interface TokenPair {
+  accessToken: string;
+  refreshToken: string;
+}
+
+// Відповідь BFF стає сесією, лише якщо обидва токени — непорожні рядки.
+export function isTokenPair(value: unknown): value is TokenPair {
+  const pair = value as Partial<Record<keyof TokenPair, unknown>> | null;
+  return (
+    typeof pair?.accessToken === 'string' &&
+    pair.accessToken !== '' &&
+    typeof pair.refreshToken === 'string' &&
+    pair.refreshToken !== ''
+  );
+}
+
 export function tokenCookies(secure: boolean) {
   return { httpOnly: true, path: '/', sameSite: 'lax' as const, secure };
 }
