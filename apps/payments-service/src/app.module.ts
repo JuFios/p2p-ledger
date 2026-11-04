@@ -34,7 +34,8 @@ import { entities, migrations } from './data-source';
       }),
     }),
     ScheduleModule.forRoot(),
-    // Застосовується лише там, де стоїть TransferThrottlerGuard (POST /transfers).
+    // Застосовується лише там, де стоїть TransferThrottlerGuard: POST /transfers
+    // і оплата частки мають один спільний ліміт на користувача.
     ThrottlerModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => [

@@ -1,6 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import { QueryFailedError } from 'typeorm';
-import { hashRequest } from '../../src/ledger/ledger-writer';
+import { hashRequest } from '../../src/common/request-hash';
 import { rethrowOperationConflict } from '../../src/ledger/ledger-errors';
 
 describe('hashRequest', () => {

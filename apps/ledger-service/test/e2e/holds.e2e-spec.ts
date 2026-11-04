@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { createApp } from './helpers';
+import { createApp, deposit } from './helpers';
 import {
   account,
   balanceOf,
@@ -372,6 +372,47 @@ describe('Holds (e2e)', () => {
     const { res } = await placeHold(app, eur, '1000', { currency: 'EUR' });
     expect([res.status, res.body.code]).toEqual([409, 'WALLET_FROZEN']);
     expect((await balanceOf(app, a)).held).toBe('0.00');
+  });
+
+  it('відмова place запам’ятовується: запізнілий дубль після поповнення не ставить холд', async () => {
+    const a = await account(app);
+    const first = await placeHold(app, a, '15000');
+    expect([first.res.status, first.res.body.code]).toEqual([409, 'INSUFFICIENT_FUNDS']);
+    // Коштів уже вистачає, але запит із тим самим operationId — той самий.
+    await deposit(app, a.token, a.walletId, 100).then((r) => expect(r.status).toBe(201));
+    const late = await internal(app).post('/internal/holds', first.body);
+    expect([late.status, late.body]).toEqual([409, first.res.body]);
+    expect(await balanceOf(app, a)).toEqual({
+      balance: '200.00',
+      available: '200.00',
+      held: '0.00',
+    });
+    await internal(app).get(`/internal/holds/${first.holdId}`).expect(404);
+    expect(await types(a.walletId)).not.toContain('HoldPlaced');
+
+    // Інший operationId — нова команда.
+    const next = await placeHold(app, a, '15000');
+    expect(next.res.status).toBe(201);
+  });
+
+  it('паралельні дублі відхиленого place отримують одну відмову', async () => {
+    const a = await account(app);
+    const transferId = randomUUID();
+    const body = {
+      operationId: `transfer:${transferId}:hold`,
+      holdId: transferId,
+      walletId: a.walletId,
+      ownerId: a.userId,
+      amountMinor: '15000',
+      currency: 'USD',
+      transferId,
+    };
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () => internal(app).post('/internal/holds', body)),
+    );
+    expect(results.map((r) => [r.status, r.body.code])).toEqual(
+      Array(5).fill([409, 'INSUFFICIENT_FUNDS']),
+    );
   });
 
   it('release з walletId чужого гаманця для наявного холду → 400, холд не знято', async () => {

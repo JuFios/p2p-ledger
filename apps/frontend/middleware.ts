@@ -86,9 +86,19 @@ export async function middleware(req: NextRequest) {
     res.cookies.set('refreshToken', tokens.refreshToken, options);
     return res;
   } catch {
-    return NextResponse.json(
-      { message: 'Не вдалося оновити сесію. Спробуйте ще раз.' },
-      { status: 503 },
+    const message = 'Не вдалося оновити сесію. Спробуйте ще раз.';
+    if (isApi) return NextResponse.json({ message }, { status: 503 });
+    // Сторінці — коротке пояснення з повтором замість сирого JSON. Cookie
+    // лишаються: збій тимчасовий, повтор оновить сесію.
+    return new NextResponse(
+      `<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Сервіс тимчасово недоступний</title></head><body style="font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem"><h1>Сервіс тимчасово недоступний</h1><p>${message}</p><p><a href="">Оновити сторінку</a></p></body></html>`,
+      {
+        status: 503,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+        },
+      },
     );
   }
 }

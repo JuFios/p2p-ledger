@@ -401,6 +401,25 @@ describe('TransferSaga', () => {
       );
     });
 
+    it('HOLD: відмова після спроби без відповіді → FAILED без release', async () => {
+      const ledger = ledgerMock();
+      // Відмову ledger запам'ятовує під тим самим operationId, тож перша
+      // спроба, що дійде пізніше, отримає її ж — компенсувати нічого.
+      ledger.placeHold
+        .mockRejectedValueOnce(unavailable())
+        .mockRejectedValueOnce(rejection('INSUFFICIENT_FUNDS'));
+      const result = await runSaga(createSaga(ledger), newTransfer());
+      expect(result).toMatchObject({
+        status: 'FAILED',
+        step: 'HOLD',
+        failureReason: 'INSUFFICIENT_FUNDS',
+      });
+      expect(ledger.placeHold).toHaveBeenCalledTimes(2);
+      expect(ledger.placeHold.mock.calls[1]).toEqual(ledger.placeHold.mock.calls[0]);
+      expect(ledger.captureHold).not.toHaveBeenCalled();
+      expect(ledger.releaseHold).not.toHaveBeenCalled();
+    });
+
     it('RESOLVE_RECIPIENT: спроби вичерпано → FAILED без release', async () => {
       const ledger = ledgerMock();
       ledger.findUserByEmail.mockRejectedValue(unavailable());

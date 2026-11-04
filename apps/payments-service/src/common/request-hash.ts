@@ -1,4 +1,3 @@
-import { UnprocessableEntityException } from '@nestjs/common';
 import { createHash } from 'crypto';
 
 // Канонічний JSON (ключі відсортовано): хеш не залежить від порядку полів,
@@ -17,14 +16,4 @@ export function hashRequest(request: unknown): string {
   return createHash('sha256')
     .update(JSON.stringify(canonical(request)))
     .digest('hex');
-}
-
-// Повтор з тим самим Idempotency-Key має бути тим самим запитом, інакше 422.
-export function assertSameRequest(storedHash: string | null, requestHash: string) {
-  if (storedHash !== requestHash) {
-    throw new UnprocessableEntityException({
-      code: 'IDEMPOTENCY_KEY_REUSED',
-      message: 'Ключ ідемпотентності вже використано з іншими параметрами',
-    });
-  }
 }

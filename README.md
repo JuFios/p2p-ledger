@@ -30,7 +30,7 @@
 | `apps/notifications-service` | Activity, Socket.IO `/ws` |
 | `apps/bff`, `apps/frontend` | Публічний API та UI |
 | `tests/system` | System-тести й race-скрипт `load/double-spend.ts` |
-| `contracts`, `.github/workflows` | Спільні правила (валюти, суми, env, outbox relay) і CI |
+| `contracts`, `.github/workflows` | Спільні правила (валюти, суми, хеш запиту, перевірка JWT, env, outbox relay) і CI |
 
 Свідомі компроміси й межі — в [обмеженнях](#обмеження-та-подальші-зміни).
 Нижче — деталі.
@@ -229,7 +229,7 @@ week/ordinal/basic та неіснуючі дні відхиляються до 
 | RISK_CHECK | `TRANSFER_MAX_AMOUNT`, `BLOCKED_EMAILS` | FAILED без зміни грошей | Неочікувана помилка повторюється до ліміту, потім FAILED. |
 | RESOLVE_RECIPIENT | Пошук за email, заборона self-transfer за userId, ensure гаманця | FAILED; порожній створений гаманець лишається | Backoff до ліміту, потім FAILED. |
 | FX_QUOTE | Зберегти курс, його час і суму зарахування | FAILED, холду ще немає | Повтор до ліміту, потім FAILED. |
-| HOLD | available → held, `transfer:<id>:hold` | FAILED, ledger відхилив команду | Повтор тим самим operationId; після ліміту RELEASE_HOLD, бо холд міг з’явитися. |
+| HOLD | available → held, `transfer:<id>:hold` | FAILED, ledger відхилив команду й запам’ятав відмову під operationId | Повтор тим самим operationId; після ліміту RELEASE_HOLD, бо холд міг з’явитися. |
 | CONFIRM | Курс не застарів, отримувач не frozen | COMPENSATING → RELEASE_HOLD → FAILED | Повтор до ліміту, потім RELEASE_HOLD. |
 | CAPTURE | Атомарно held відправника → available отримувача, `transfer:<id>:capture` | RELEASE_HOLD → FAILED | Повтор capture; після ліміту перевірити холд: CAPTURED → COMPLETED, інший стан → компенсація. Недоступний ledger → далі чекати з backoff. |
 | RELEASE_HOLD | held → available, `transfer:<id>:release` | NOT_FOUND → FAILED; HOLD_NOT_ACTIVE / IDEMPOTENCY_KEY_REUSED → перевірити холд: CAPTURED → COMPLETED, RELEASED/немає → FAILED, ACTIVE → повтор | Без ліміту повторів, доки результат не визначено; COMPENSATING зберігається. |
@@ -238,7 +238,10 @@ week/ordinal/basic та неіснуючі дні відхиляються до 
 Таймаут/5xx/breaker open означає невідомий результат, а не відмову.
 Невідомий capture не компенсується наосліп. Release передає `walletId`:
 для ще не створеного холду ledger під блокуванням гаманця лишає слід в `operations`,
-тож запізнілий place отримує `HOLD_NOT_ACTIVE`. Capture/release серіалізуються;
+тож запізнілий place отримує `HOLD_NOT_ACTIVE`. Відмову place (409) ledger зберігає
+в `operations` під operationId так само, як успіх: спроба, що застрягла й дійшла вже
+після відмови повтору, отримує ту саму відмову, тож холд після FAILED не з’являється
+за будь-якої причини повтору (таймаут, падіння runner'а, втрачений lease). Capture/release серіалізуються;
 фінал визначається за станом холду. Після компенсації FAILED зберігає `RELEASE_HOLD`;
 `DONE` буває лише при COMPLETED.
 
@@ -323,8 +326,11 @@ Socket.IO `/ws` приймає access JWT, сервер визначає кім�
 OTel завантажується до HTTP/ORM/Redis/Pino. Контекст проходить через
 `transfers.traceparent`, outbox, `publish <type>` та `process <type>`;
 кожна спроба `saga.step <STEP>` лишається в trace запиту з `transfer.id`.
-У Jaeger шукайте payments-service / `POST /transfers`; адмінка через
-BFF `GET /admin/traces` показує тривалість кожної спроби зі span, у мілісекундах.
+У Jaeger шукайте payments-service / `POST /transfers` або
+`POST /split-bills/:id/shares/:shareId/pay` (оплата частки). Адмінка через
+BFF `GET /admin/traces` шукає trace за першим кроком саги `saga.step RISK_CHECK`:
+так видно сагу з будь-якого запиту, а запити, що сагу не запустили (відмова валідації, повтор за ключем),
+місця в списку не займають. Найновіші trace першими, тривалість кожної спроби — зі span, у мілісекундах.
 JSON-логи містять trace_id/span_id (null поза span), секретні заголовки маскуються.
 `/metrics`: Node/process, у payments також `transfers_total{status}` та
 `saga_step_duration_seconds{step}`. Метрики процесу не замінюють фінансовий журнал.
@@ -373,7 +379,8 @@ JSON-логи містять trace_id/span_id (null поза span), секрет
 
 Збережено окремі пакети, Node/Nest/Next major, DTO login/register, bcrypt паролів,
 основу Compose. Login/register мають ті самі поля, submit і роутинг;
-змінено оформлення й підписи. Спільного Prettier/tsconfig та підключеного брокера
+змінено оформлення й підписи, а login на 429 показує час очікування з `Retry-After`,
+на 5xx — недоступність сервісу, а не «невірний пароль». Спільного Prettier/tsconfig та підключеного брокера
 notifications у фактичному стартері не було, попри опис у ТЗ.
 
 | Що змінено | Навіщо |
@@ -408,7 +415,8 @@ available/held/frozen. Витрати обмежені available, frozen бло�
 | Frontend persistence/client/parsers | Фікстури отримали userId, step, currency/toCurrency та явний парсер. Нові рядкові стани дозволені, malformed/missing/валюти лишаються строгими; ключі, polling і захист від старих відповідей збережені. |
 | Frontend format/BillDetails | UTC SSR → пояс браузера замість фіксованого поясу; перевірки hydration, DST і включного календаря. |
 | Payments split-validation | Два direct-call null тести проходять реальний ValidationPipe → сервіс: null відхиляється до hash/БД, з ключем і без. HTTP e2e збережено. |
-| BFF Jaeger, frontend login HTTP | Додано перевірки `X-Forwarded-For`: IP клієнта не йде в Jaeger, login передає його в BFF. Попередні перевірки без змін. |
+| BFF Jaeger, frontend login HTTP | Додано перевірки `X-Forwarded-For`: IP клієнта не йде в Jaeger, login передає його в BFF. Traces шукаються за першим кроком саги `saga.step RISK_CHECK` замість кореневого `POST /transfers`, щоб охопити й оплату частки; порядок і тривалість спроб перевіряються як раніше. |
+| Tracing-env (усі сервіси) | Таймаут дочірнього процесу 15 → 60 с: на завантаженій машині старт ts-node і OTel SDK не вкладався в 15 с. Перевірка експорту в collector і `service.name` з `.env` та сама. |
 
 Регресійні тести охоплюють переставлені відповіді polling/live/manual і збереження помилки гаманців до успішного повного оновлення,
 DST опівночі, logout за проксі, конкурентну реєстрацію на PostgreSQL, ліміт невдалих логінів за IP (успішні входи й паралельні спроби)
@@ -494,11 +502,14 @@ Login лімітується за email (`LOGIN_RATE_LIMIT`) і окремо з�
 ліміт не витрачають, а паралельні запити його не перевищують. IP визначає nginx:
 він перезаписує `X-Forwarded-For` адресою з'єднання, тож підставлений клієнтом заголовок
 не діє. Frontend і BFF передають це значення далі, ledger бере останній запис.
-Transfers/pay лімітуються за userId.
+Transfers і pay мають один спільний ліміт за userId (`TRANSFER_RATE_LIMIT`): обидва створюють переказ.
 `/dashboard` паралельно повертає секції data/error, відмова одного джерела не ховає решту.
 
 Middleware оновлює access через refresh; паралельні refresh об’єднуються в процесі,
 успішна пара кешується на 30 с для запізнілих запитів зі старою cookie.
+Тимчасовий збій refresh лишає cookie: API отримує JSON 503, сторінка — HTML 503 з повтором.
+Login передає `Retry-After` ліміту, некоректне тіло запиту отримує 400, а відповідь BFF
+без пари токенів — 502 без cookie.
 Logout відкликає sid і очищає cookie; уже виданий access живе до свого exp.
 `/api/auth/ws-token` віддає access у пам’ять сторінки для handshake; refresh лишається
 в httpOnly-cookie. Cookie: SameSite=Lax, Secure при HTTPS. У localStorage токенів немає.
@@ -535,6 +546,18 @@ Connect/reconnect перечитує REST-стан; після JWT exp соке�
   Для кількох інстансів потрібні спільні WS-кімнати та узгодження порядку emit,
   refresh і rate limit. Runner чекає найповільнішу сагу пачки; пул зі звільненням
   слотів покращив би використання ресурсів.
+- Відмову під ключем ідемпотентності ledger запам'ятовує лише для холду саги.
+  Deposit/withdraw з тим самим `Idempotency-Key` після відмови (недостатньо коштів,
+  frozen тощо) виконуються наново; UI після остаточної відмови генерує новий ключ.
+  Строгіший варіант — так само зберігати їхню відмову в `operations`.
+- `CONSUMER_NAME` за замовчуванням — hostname і pid: після перестворення контейнера
+  старий консюмер лишається в групі `notifications`, його pending забирає XAUTOCLAIM
+  через `CONSUMER_CLAIM_IDLE_MS`. Для тривалої роботи — стабільне ім'я або
+  періодичний `XGROUP DELCONSUMER` консюмерів без pending.
+- Consumer викликає XAUTOCLAIM перед кожним XREADGROUP — простіше, але під
+  навантаженням це зайві звернення до Redis; достатньо раз на половину `CONSUMER_CLAIM_IDLE_MS`.
+- Admin event-лог гаманця віддається повністю, без пагінації; для гаманців
+  з великою історією потрібні `limit` і курсор за global_position.
 - Один refresh-вхід на користувача: новий login відкликає попередній refresh.
   При недоступному BFF logout очищає локальні cookie, але серверне відкликання
   не гарантоване. Безключовий API-виклик не має гарантії від дубля після втрати відповіді.

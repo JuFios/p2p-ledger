@@ -379,7 +379,7 @@ it('protects freeze and proxies allowed admin operations', async () => {
   ]);
 });
 
-it('queries the verified root operation and returns ordered saga attempts in milliseconds', async () => {
+it('queries the saga start step and returns ordered saga attempts in milliseconds', async () => {
   const span = (
     spanID: string,
     operationName: string,
@@ -435,14 +435,52 @@ it('queries the verified root operation and returns ordered saga attempts in mil
         ],
       },
     ]);
+  expect(jaeger.calls).toHaveLength(1);
   const url = new URL(jaeger.calls[0].url!, jaeger.url);
   expect(Object.fromEntries(url.searchParams)).toEqual({
     service: 'payments-service',
-    operation: 'POST /transfers',
+    operation: 'saga.step RISK_CHECK',
     limit: '7',
   });
   expect(jaeger.calls[0].headers.authorization).toBeUndefined();
   expect(jaeger.calls[0].headers['x-forwarded-for']).toBeUndefined();
+});
+
+it('returns the newest saga traces first, whatever request started them', async () => {
+  const trace = (traceID: string, root: string, startTime: number) => ({
+    traceID,
+    processes: { p1: { serviceName: 'payments-service' } },
+    spans: [
+      {
+        spanID: `${traceID}-root`,
+        operationName: root,
+        startTime,
+        duration: 1,
+        processID: 'p1',
+      },
+      {
+        spanID: `${traceID}-step`,
+        operationName: 'saga.step RISK_CHECK',
+        startTime: startTime + 10,
+        duration: 1000,
+        processID: 'p1',
+      },
+    ],
+  });
+  jaeger.data = {
+    data: [
+      trace('transfer', 'POST /transfers', 1000),
+      trace('pay', 'POST /split-bills/:id/shares/:shareId/pay', 5000),
+    ],
+  };
+  const res = await request(app.getHttpServer())
+    .get('/admin/traces')
+    .set('Authorization', `Bearer ${admin}`)
+    .expect(200);
+  expect(res.body.map((item: { traceId: string }) => item.traceId)).toEqual([
+    'pay',
+    'transfer',
+  ]);
 });
 
 it('handles empty and unavailable Jaeger responses', async () => {

@@ -1,6 +1,7 @@
 import { isUUID } from 'class-validator';
 import { ActivityType } from '../activity/activity.entity';
 import { SUPPORTED_CURRENCIES } from '../common/currencies';
+import { formatMinor, parseMinor } from '../common/money';
 
 export interface IntegrationEvent {
   eventId: string;
@@ -51,10 +52,14 @@ function uuid(value: unknown): string {
     throw new Error('Invalid UUID');
   return value;
 }
+// Формат суми — лише з контракту money.ts.
 function money(value: unknown): bigint {
-  if (typeof value !== 'string' || !/^\d+\.\d{2}$/.test(value))
+  if (typeof value !== 'string') throw new Error('Invalid money');
+  try {
+    return parseMinor(value);
+  } catch {
     throw new Error('Invalid money');
-  return BigInt(value.replace('.', ''));
+  }
 }
 const MAX_EVENT_POSITION = 9223372036854775807n;
 const TRANSFER_STATUSES = [
@@ -118,7 +123,7 @@ function mapWalletBalances(event: IntegrationEvent, users: string[]): Push[] {
         payload: {
           walletId: uuid(wallet.walletId),
           currency: wallet.currency,
-          balance: `${total / 100n}.${(total % 100n).toString().padStart(2, '0')}`,
+          balance: formatMinor(total),
           available: balanceAfter.available,
           held: balanceAfter.held,
         },

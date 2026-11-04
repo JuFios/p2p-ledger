@@ -30,4 +30,14 @@ for (const service of ['bff', 'ledger-service', 'payments-service', 'notificatio
 for (const service of ['bff', 'ledger-service', 'payments-service', 'notifications-service']) sync('contracts/config-policy.spec.ts', `apps/${service}/test/config-policy.spec.ts`);
 for (const service of ['bff', 'ledger-service', 'payments-service', 'notifications-service']) sync('contracts/currencies.ts', `apps/${service}/src/common/currencies.ts`);
 sync('contracts/currencies.ts', 'apps/frontend/lib/currencies.ts');
+const moneyTargets = { 'ledger-service': 'ledger/domain', 'payments-service': 'common', 'notifications-service': 'common' };
+for (const [service, dir] of Object.entries(moneyTargets)) sync('contracts/money.ts', `apps/${service}/src/${dir}/money.ts`);
+for (const service of ['ledger-service', 'payments-service']) {
+  sync('contracts/request-hash.ts', `apps/${service}/src/common/request-hash.ts`);
+  sync('contracts/tracing.ts', `apps/${service}/src/common/tracing.ts`);
+}
+for (const service of ['bff', 'payments-service', 'notifications-service']) {
+  sync('contracts/jwt.strategy.ts', `apps/${service}/src/auth/jwt.strategy.ts`);
+  sync('contracts/jwt-strategy.spec.ts', `apps/${service}/test/jwt-strategy.spec.ts`);
+}
 if (stale) process.exitCode = 1;

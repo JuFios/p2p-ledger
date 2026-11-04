@@ -1,4 +1,4 @@
-// Гроші в ledger — bigint у мінорних одиницях (центах).
+// Гроші — bigint у мінорних одиницях (центах), однаково в усіх сервісах.
 
 export function parseMinor(amount: string): bigint {
   const match = /^(\d+)\.(\d{2})$/.exec(amount);

@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { isUUID } from 'class-validator';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
@@ -22,11 +23,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
+      algorithms: ['HS256'],
       secretOrKey: config.getOrThrow<string>('JWT_ACCESS_SECRET'),
     });
   }
 
   async validate(payload: JwtPayload): Promise<AuthUser> {
+    if (!isUUID(payload.sub)) throw new UnauthorizedException();
     return { userId: payload.sub, email: payload.email, role: payload.role };
   }
 }

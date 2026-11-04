@@ -186,3 +186,14 @@ it.each(['TransferInitiated', 'TransferFailed'])(
     ).toThrow('Wallet owner missing from userIds');
   },
 );
+
+it.each([10, '10', '1.5', '-1.00', ['1.00']])(
+  'rejects a wallet balance that is not a "0.00" string (%p)',
+  (available) => {
+    const payload = wallet(alice);
+    payload.balanceAfter = { ...payload.balanceAfter, available } as never;
+    expect(() => mapEvent(event('MoneyDeposited', payload))).toThrow(
+      'Invalid money',
+    );
+  },
+);

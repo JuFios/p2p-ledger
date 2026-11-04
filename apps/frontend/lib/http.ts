@@ -2,6 +2,8 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    // Retry-After відповіді з лімітом (429), щоб передати його далі.
+    public retryAfter: string | null = null,
   ) {
     super(message);
   }
@@ -21,6 +23,7 @@ export async function readResponse<T>(res: Response): Promise<T> {
     throw new ApiError(
       res.status,
       Array.isArray(message) ? message.join(', ') : String(message),
+      res.headers.get('Retry-After'),
     );
   }
   return body as T;
